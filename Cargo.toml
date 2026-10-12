@@ -1,0 +1,23 @@
+[package]
+name = "rusted-calamari"
+version = "0.3.0"
+edition = "2024"
+description = "Retro image browser and organizer with the Octobrachial Tree view"
+
+[lib]
+name = "octo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rusted-calamari"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.36", features = ["persistence"] }
+image = "0.25"
+rfd = "0.17"
+egui-phosphor = { version = "0.14", default-features = false, features = ["bold", "fill"] }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
