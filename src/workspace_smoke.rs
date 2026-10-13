@@ -16,6 +16,7 @@ pub(super) struct Smoke {
 }
 
 impl App {
+    #[allow(dead_code)] // Used by the separate, feature-gated smoke runner.
     pub fn enable_smoke(&mut self, out: PathBuf) {
         self.s.pin_ui = true;
         self.s.dock = Dock::default();
@@ -44,7 +45,13 @@ impl App {
             && class == egui::ViewportClass::Immediate
             && ctx.input(|i| i.viewport().inner_rect.is_some())
         {
-            smoke.native_seen.insert(widget.index());
+            if smoke.native_seen.insert(widget.index()) {
+                smoke.report.push(format!(
+                    "{}: {:?}",
+                    widget.title(),
+                    ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect))
+                ));
+            }
         }
     }
 
@@ -224,10 +231,11 @@ impl App {
             _ => unreachable!(),
         }
         smoke.report.push(format!(
-            "Phase {} passed; docked={}; image_focus={}",
+            "Phase {} passed; docked={}; image_focus={}; geometry={:?}",
             smoke.phase,
             self.s.dock.docked_count(),
-            self.focus.active()
+            self.focus.active(),
+            self.s.dock.widgets.map(|p| p.geometry)
         ));
         std::fs::write(smoke.out.join("progress.txt"), smoke.report.join("\n")).unwrap();
         smoke.phase += 1;

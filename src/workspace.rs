@@ -293,6 +293,10 @@ impl App {
                     return;
                 }
                 let native = child.input(|i| i.viewport().inner_rect);
+                // ViewportBuilder positions the outer window, while sizes
+                // describe its client area. Feeding the client origin back
+                // into the builder accumulates native frame offsets.
+                let outer = child.input(|i| i.viewport().outer_rect);
                 let full = ui.max_rect();
                 ui.painter().rect_filled(full, 0.0, PANEL);
                 let g = Grid::new(&child, SIZES[self.s.size % SIZES.len()]);
@@ -307,6 +311,10 @@ impl App {
                     window::hairline(&child, full);
                 }
                 if let Some(native) = native {
+                    let settled = Geometry::from_rect(Rect::from_min_size(
+                        outer.unwrap_or(native).min,
+                        native.size(),
+                    ));
                     let mut snap = false;
                     let mut finish = false;
                     if let Some(drag) = &mut self.float_drags[w.index()] {
@@ -322,8 +330,8 @@ impl App {
                             finish = true;
                         }
                         child.request_repaint_after(std::time::Duration::from_millis(16));
-                    } else if self.s.dock.floating(w) && Geometry::from_rect(native).valid() {
-                        self.s.dock.widgets[w.index()].geometry = Some(Geometry::from_rect(native));
+                    } else if self.s.dock.floating(w) && settled.valid() {
+                        self.s.dock.widgets[w.index()].geometry = Some(settled);
                     }
                     if finish {
                         self.float_drags[w.index()] = None;
@@ -331,9 +339,8 @@ impl App {
                             self.s.dock.dock(w);
                             self.s.tree = true;
                             self.fold_clicks.reset();
-                        } else if Geometry::from_rect(native).valid() {
-                            self.s.dock.widgets[w.index()].geometry =
-                                Some(Geometry::from_rect(native));
+                        } else if settled.valid() {
+                            self.s.dock.widgets[w.index()].geometry = Some(settled);
                         }
                         ctx.request_repaint();
                     }

@@ -2,6 +2,7 @@
 name = "rusted-calamari"
 version = "0.3.0"
 edition = "2024"
+default-run = "rusted-calamari"
 description = "Retro image browser and organizer with the Octobrachial Tree view"
 
 [lib]
