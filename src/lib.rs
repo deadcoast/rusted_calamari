@@ -8,6 +8,7 @@
 //! highlighter.
 
 pub mod config;
+pub mod fsbrowser;
 pub mod layout;
 pub mod ops;
 pub mod paint;

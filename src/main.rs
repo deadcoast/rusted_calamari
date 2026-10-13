@@ -5,6 +5,8 @@
 //! and its edges resize it (see `window`).
 
 mod app;
+mod dock;
+mod browserpane;
 mod theme;
 mod focus;
 mod fonts;

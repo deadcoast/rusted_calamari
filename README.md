@@ -55,7 +55,7 @@ To update, run `cargo install --path .` again from the repo. To remove it, run
 ## Requirements
 
 | | |
-|---|---|
+| --- | --- |
 | Rust | 1.95 or newer (egui 0.36 needs it). Check with `rustc --version`. |
 | Windows | The MSVC C++ build tools. The rustup installer offers them; otherwise install Visual Studio Build Tools with "Desktop development with C++". |
 | macOS | The Xcode command line tools: `xcode-select --install`. |
@@ -86,7 +86,7 @@ Pin the interface.
 ## Keys
 
 | Key | Does |
-|---|---|
+| --- | --- |
 | `←` `→` · `↑` `↓` · `[` `]` · `;` `'` | Back/on 1 · 5 · 25 · 50 |
 | `z` `x` `c` `v` `Space` | Move the image into a category (rebind in Settings) |
 | `Ctrl+Z` / `Backspace` · `Ctrl+Shift+Z` / `Ctrl+Y` | Undo · redo (moves, trash, saves, crops, edits) |
@@ -126,7 +126,7 @@ The maximize button (or `F11`, or a double-click on the top bar) steps
 through three sizes:
 
 | Size | The window |
-|---|---|
+| --- | --- |
 | **Fit** | Wraps the picture at the size the window had when you folded the tree |
 | **Large** | Wraps it as large as the screen allows, taskbar excluded |
 | **Full** | Full screen, picture centred, bars only where its shape differs from the screen's |
@@ -141,7 +141,7 @@ the tree gives the window back its earlier size.
 
 Categories live in `<library>/.calamari`, one per line:
 
-```
+```calamari
 # key  name     cid      tier
 spc    _float_  #E6D463  a
 -      _fav_    #F0A35E  b
@@ -185,7 +185,7 @@ which would lose their frames.
 ## Where things live
 
 | What | Where |
-|---|---|
+| --- | --- |
 | Settings and last library | Windows `%APPDATA%\Rusted Calamari\data\app.ron` · macOS `~/Library/Application Support/Rusted-Calamari/` · Linux `~/.local/share/rustedcalamari/app.ron` |
 | Category table | `<library>/.calamari` |
 | Trash | `<library>/.calamari_trash/` |
@@ -219,7 +219,7 @@ The tests cover the tree layout and click engine, file operations
 (move/undo, rotate/restore, export), image focus sizing and the toolbar
 layout.
 
-```
+```txt
 src/
   main.rs       window setup (borderless)
   app.rs        the viewer: stage, tree pane, menus, dialogs, keys, undo/redo

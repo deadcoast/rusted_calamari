@@ -405,7 +405,11 @@ fn beak_arms(rows: Vec<Line>) -> Vec<Arm> {
 }
 
 fn block(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx) -> Block {
-    let lab = label(t, id, ctx);
+    block_with_labels(t, id, depth, style, ctx, &|id, cx| label(t, id, cx))
+}
+
+fn block_with_labels(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx, labels: &dyn Fn(usize, &Ctx) -> Line) -> Block {
+    let lab = labels(id, ctx);
     let n = &t.nodes[id];
     let is_active = ctx.active == Some(id);
     if !is_active && (!n.open || n.kids.is_empty()) {
@@ -428,7 +432,7 @@ fn block(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx) -> Block {
     }
     let rows = beak_rows(t, id, ctx.active == Some(id), ctx);
     let (vis, hidden, p, pages) = arms(t, id, ctx.active == Some(id));
-    let mut kids: Vec<Arm> = vis.iter().map(|&k| arm(block(t, k, depth + 1, style, ctx), t.nodes[k].side)).collect();
+    let mut kids: Vec<Arm> = vis.iter().map(|&k| arm(block_with_labels(t, k, depth + 1, style, ctx, labels), t.nodes[k].side)).collect();
     if hidden > 0 {
         let side = kids.last().map_or(Side::Down, |k| k.side);
         kids.push(arm(Block::one(ink(id, hidden, p, pages)), side));
@@ -664,4 +668,17 @@ pub fn fit(t: &Tree, style: Style, ctx: &Ctx, cols: usize) -> (Frame, usize) {
 
 pub fn height(t: &Tree, id: usize, style: Style, ctx: &Ctx) -> usize {
     block(t, id, 1, style, ctx).lines.len()
+}
+
+/// Reuse OTF composition, paging, mirroring and reflow with labels supplied
+/// by a read-only filesystem projection. Category rendering is unchanged.
+pub fn outline(t: &Tree, style: Style, cols: usize, labels: &dyn Fn(usize, &Ctx) -> Line) -> (Frame, Ctx) {
+    let mut last = None;
+    for level in 0..REFLOW.len() {
+        let cx = Ctx::default().level(level);
+        let frame = Frame { lines: block_with_labels(t, 0, 0, style, &cx, labels).lines };
+        if cols == 0 || frame.width() <= cols { return (frame, cx); }
+        last = Some((frame, cx));
+    }
+    last.unwrap()
 }

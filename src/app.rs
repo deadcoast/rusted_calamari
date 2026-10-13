@@ -24,6 +24,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[path = "workspace.rs"]
+mod workspace;
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod workspace_tests;
+use crate::dock::{Dock, FoldClicks, FoldGesture, Widget};
+use crate::browserpane::Files;
+
 const STYLES: [Style; 3] = [Style::Arm, Style::Beak, Style::Boxed];
 const STYLE_NAMES: [&str; 3] = ["Octobrachial Arm", "Octobrachial Beak", "Boxtobrachial"];
 const SWATCHES: [&str; 12] = [
@@ -107,6 +115,8 @@ pub struct Settings {
     /// The tool strip at the top right.
     pub toolbar: bool,
     pub library: Option<PathBuf>,
+    pub dock: Dock,
+    pub files_root: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -124,6 +134,8 @@ impl Default for Settings {
             title: false,
             toolbar: false,
             library: None,
+            dock: Dock::default(),
+            files_root: None,
         }
     }
 }
@@ -237,6 +249,8 @@ enum Act {
     Edit(Op),
     Trash,
     Tree,
+    RecallTrees,
+    Widget(Widget),
     /// Fold or unfold the image (the tree takes the window).
     Image,
     Fit,
@@ -375,29 +389,42 @@ pub struct App {
     /// interface steps aside (see `ui`).
     yielding: bool,
     quitting: bool,
+    files: Files,
+    dock_drag: Option<workspace::DockDrag>,
+    float_drags: [Option<workspace::FloatDrag>; 2],
+    fold_clicks: FoldClicks,
+    fold_action: Option<Act>,
+    main_rect: Option<Rect>,
+    snap_zone: Option<Rect>,
+    next_library: Option<(PathBuf, Option<PathBuf>)>,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, arg: Option<PathBuf>) -> App {
         let s: Settings = cc.storage.and_then(|st| eframe::get_value(st, "rusted-calamari")).unwrap_or_default();
+        Self::with_settings(cc.egui_ctx.clone(), s, arg)
+    }
+
+    fn with_settings(ctx: egui::Context, mut s: Settings, arg: Option<PathBuf>) -> App {
+        s.dock.sanitize();
         let app_font = s.font;
         let focus_budget = s.focus_budget.map(Vec2::from);
         let focus_home = s.home.map(|(h, m)| (Vec2::from(h), m));
         // Fonts go in before the first frame: the icon families must exist
         // the first time anything draws an icon.
-        fonts::install(&cc.egui_ctx, s.font);
+        fonts::install(&ctx, s.font);
         let mut v = egui::Visuals::dark();
         v.text_cursor.stroke = Stroke::new(2.0, RUST_HI);
         v.selection.bg_fill = RUST;
         v.panel_fill = STAGE;
-        cc.egui_ctx.set_visuals(v);
+        ctx.set_visuals(v);
         let mut app = App {
             s,
             font_on: Some(app_font),
             lib: None,
-            loader: Loader::new(cc.egui_ctx.clone()),
-            saver: Saver::new(cc.egui_ctx.clone()),
-            egui: cc.egui_ctx.clone(),
+            loader: Loader::new(ctx.clone()),
+            saver: Saver::new(ctx.clone()),
+            egui: ctx.clone(),
             view: View { rows: 40, scroll: 0 },
             dialog: Dialog::None,
             menu: None,
@@ -438,11 +465,21 @@ impl App {
             need: Vec2::ZERO,
             yielding: false,
             quitting: false,
+            files: Files::default(),
+            dock_drag: None,
+            float_drags: [None, None],
+            fold_clicks: FoldClicks::default(),
+            fold_action: None,
+            main_rect: None,
+            snap_zone: None,
+            next_library: None,
         };
         let start = arg.or_else(|| app.s.library.clone()).filter(|p| p.is_dir());
         if let Some(p) = start {
             app.open_library(&p, 0.0);
         }
+        let files_root = app.s.files_root.clone().or_else(|| app.s.library.clone()).unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        app.files.start(&ctx, files_root);
         app
     }
 
@@ -463,11 +500,12 @@ impl App {
     fn record(&mut self, u: Undo) {
         self.undo.push(u);
         self.redo.clear();
+        self.files.refresh_open();
     }
 
     // ── library ──────────────────────────────────────────────────────
 
-    fn open_library(&mut self, p: &Path, now: f64) {
+    fn open_library(&mut self, p: &Path, now: f64) -> bool {
         self.settle(true);
         let p = plain(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
         match Tree::scan(&p, config::load(&p)) {
@@ -490,8 +528,9 @@ impl App {
                 self.pending.clear();
                 self.tree_hold = 0.0;
                 self.reset_view();
+                true
             }
-            Err(e) => self.say(format!("Can't open {}: {e}", p.display()), WARN, now),
+            Err(e) => { self.say(format!("Can't open {}: {e}", p.display()), WARN, now); false }
         }
     }
 
@@ -998,7 +1037,7 @@ impl App {
         if let Some(w) = self.s.panel_w {
             return w.clamp(g.cw * 24.0, (full.width() - g.cw * 24.0).max(g.cw * 24.0));
         }
-        let Some(lib) = self.lib.as_ref() else { return 0.0 };
+        let Some(lib) = self.lib.as_ref() else { return (g.cw * 36.0).min(full.width() * 0.5) };
         let f = render(&lib.tree, self.style(), &Self::ctx_of(lib, 0));
         let want = f.width() as f32 * g.cw + g.cw * 4.0;
         if self.hold_frames > 0 {
@@ -1046,7 +1085,7 @@ impl App {
         let Some(lib) = self.lib.as_ref() else { return };
         // Rows start below the menu bar's band and end above the status
         // line's, so the bars never sit on the root row when they appear.
-        let (pad_t, pad_b) = if self.s.pin_ui { (g.rh, g.rh) } else { (g.rh * 1.75, g.rh * 1.75) };
+        let (pad_t, pad_b) = (g.rh * 0.4, g.rh * 0.5);
         let inner = Rect::from_min_max(Pos2::new(x0 + g.cw * 1.5, rect.top() + pad_t), Pos2::new(rect.right() - g.cw, rect.bottom() - pad_b));
         // The tree reshapes to the width it has instead of running off it;
         // the tide reflows to the same width, so clicks land where they show.
@@ -1802,7 +1841,7 @@ impl App {
         }
         if let Some(d) = dropped.iter().find(|p| p.is_dir()) {
             let d = d.clone();
-            self.open_library(&d, now);
+            self.request_library(d, None, now);
             return;
         }
         self.import_files(&dropped, now);
@@ -1840,6 +1879,7 @@ impl App {
             Act::Settings => self.dialog = if matches!(self.dialog, Dialog::Settings) { Dialog::None } else { Dialog::Settings },
             Act::Help => self.dialog = if matches!(self.dialog, Dialog::Help) { Dialog::None } else { Dialog::Help },
             Act::Close => {
+                self.next_library = None;
                 self.dialog = match self.dialog {
                     Dialog::Form(_) => Dialog::Settings,
                     _ => Dialog::None,
@@ -1847,7 +1887,7 @@ impl App {
             }
             Act::Open => {
                 if let Some(d) = rfd::FileDialog::new().set_title("Open folder").pick_folder() {
-                    self.open_library(&d, now);
+                    self.request_library(d, None, now);
                 }
             }
             Act::ImportImages => {
@@ -1888,6 +1928,7 @@ impl App {
             Act::Trash => self.trash(now),
             // Tree and image fold in turn; one of them always stays.
             Act::Tree => {
+                if self.s.dock.docked_count() == 0 { return; }
                 if self.s.image {
                     self.s.tree = !self.s.tree;
                 } else {
@@ -1895,7 +1936,12 @@ impl App {
                     self.s.tree = true;
                 }
             }
+            Act::RecallTrees => {
+                if self.s.dock.toggle_pair() { self.s.tree = true; }
+            }
+            Act::Widget(w) => self.toggle_widget(w),
             Act::Image => {
+                if self.s.dock.docked_count() == 0 { return; }
                 if self.s.tree {
                     self.s.image = !self.s.image;
                 } else {
@@ -1974,14 +2020,12 @@ impl App {
             Act::FormCancel => self.dialog = Dialog::Settings,
             Act::SaveAllQuit => {
                 if self.save_all(now) {
-                    self.quitting = true;
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                    self.finish_unsaved(ctx, now);
                 }
             }
             Act::DiscardQuit => {
                 self.pending.clear();
-                self.quitting = true;
-                ctx.send_viewport_cmd(ViewportCommand::Close);
+                self.finish_unsaved(ctx, now);
             }
             Act::Aspect(fwd) => {
                 let px = self.current_px();
@@ -2033,6 +2077,7 @@ impl App {
             Act::Window(c) => window::apply(ctx, c),
             Act::Fullscreen => window::toggle_fullscreen(ctx),
         }
+        if matches!(a, Act::Undo | Act::Redo | Act::ImportImages) { self.files.refresh_open(); }
     }
 
     /// Give category `cat` the key `k` (None unbinds it). A key another
@@ -2341,8 +2386,11 @@ impl App {
                 it("Move to trash", "Del", Act::Trash, has_img),
             ],
             Menu::View => vec![
-                it(if self.s.tree { "Fold the tree" } else { "Unfold the tree" }, "Tab", Act::Tree, lib),
+                it(if self.s.tree { "Fold the tree" } else { "Unfold the tree" }, "Tab", Act::Tree, self.s.dock.docked_count() > 0),
                 it(if self.s.image { "Fold the image" } else { "Unfold the image" }, "Shift+Tab", Act::Image, lib),
+                it(if self.s.dock.floating(Widget::Favourites) { "Dock Favourites" } else { "Detach Favourites" }, "", Act::Widget(Widget::Favourites), true),
+                it(if self.s.dock.floating(Widget::Files) { "Dock Files" } else { "Detach Files" }, "", Act::Widget(Widget::Files), true),
+                it(if self.s.dock.docked_count() == 0 { "Recall both trees" } else { "Restore detached trees" }, "3 clicks on fold tab", Act::RecallTrees, self.s.dock.pair_allowed()),
                 it("Fit to window", "0", Act::Fit, has_img),
                 it("Actual size", "Ctrl+1", Act::Actual, has_img),
                 Item::Rule,
@@ -2497,7 +2545,12 @@ impl App {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
                 if resp.clicked() {
-                    act = Some(act_on);
+                    act = match self.fold_clicks.click(ctx.input(|i| i.time), self.s.dock.pair_allowed()) {
+                        FoldGesture::Single => Some(act_on),
+                        FoldGesture::Pair => Some(Act::RecallTrees),
+                        FoldGesture::None => None,
+                    };
+                    self.fold_action = if self.fold_clicks.pending() { Some(act_on) } else { None };
                 }
                 self.chrome_hover |= resp.contains_pointer();
             });
@@ -2845,6 +2898,19 @@ impl App {
             "Tree",
             &[("click a folder", "open it; again to fold"), ("click a slot", "move the image there"), ("right-click a slot", "browse what it holds")],
         );
+        sec(&mut rows, "Tree windows", &[
+            ("drag a header", "detach; drag back left to dock"),
+            ("Shift+click header", "dock / restore detached position"),
+            ("triple-click fold tab", "recall both detached trees; again restores"),
+            ("drag the horizontal rule", "resize the joined widgets"),
+        ]);
+        sec(&mut rows, "Files", &[
+            ("click a folder / file", "expand folder / preview media"),
+            ("double-click a folder", "browse it as the root"),
+            ("Ctrl+L / Alt+Up", "enter a path / parent folder"),
+            ("Alt+Left / Alt+Right", "back / forward"),
+            ("F5", "refresh the selected folder"),
+        ]);
         let size = theme::dialog_size(g, "Keys", &rows, 0);
         let pos = Pos2::new(full.center().x - size.x * 0.5, (full.center().y - size.y * 0.5).max(full.top() + g.rh * 2.0));
         let o = dialog(ctx, g, "help", pos, "Keys", &rows, 0, alpha, true, Act::Close, |_, _| {});
@@ -2854,13 +2920,14 @@ impl App {
 
     fn unsaved_dialog(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
         let n = self.pending.len();
+        let opening = self.next_library.is_some();
         let rows: Vec<Row<Act>> = vec![
             Row::new(vec![r(format!("{n} image{} {} edits that aren't saved.", if n == 1 { "" } else { "s" }, if n == 1 { "has" } else { "have" }), TEXT)]),
             Row::blank(),
             Row::new(vec![
-                ra("[ Save all and quit ]", RUST_HI, Act::SaveAllQuit),
+                ra(if opening { "[ Save all and open ]" } else { "[ Save all and quit ]" }, RUST_HI, Act::SaveAllQuit),
                 r("  ", DIM),
-                ra("[ Quit without saving ]", WARN, Act::DiscardQuit),
+                ra(if opening { "[ Open without saving ]" } else { "[ Quit without saving ]" }, WARN, Act::DiscardQuit),
                 r("  ", DIM),
                 ra("[ Cancel ]", MUTED, Act::Close),
             ]),
@@ -2988,11 +3055,16 @@ impl eframe::App for App {
         }
         let now = ctx.input(|i| i.time);
 
+        self.files.poll();
+        if self.fold_clicks.poll(now) == FoldGesture::Single && let Some(a) = self.fold_action.take() { self.act(&ctx, a, now); }
+        if self.fold_clicks.pending() { ctx.request_repaint_after(std::time::Duration::from_millis(50)); }
+
         // Closing waits for queued writes; with unsaved edits it asks first.
         if ctx.input(|i| i.viewport().close_requested()) {
             self.settle(true);
             if !self.pending.is_empty() && !self.quitting {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                self.next_library = None;
                 self.dialog = Dialog::Unsaved;
             }
         }
@@ -3007,12 +3079,17 @@ impl eframe::App for App {
             self.snaps.remove(&p);
         }
         self.win_full = window::state(&ctx).1;
+        if ctx.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| self.img_rect.is_some_and(|r| r.contains(p)))) {
+            self.files.focused = false;
+        }
+        if !self.s.dock.floating(Widget::Files) { self.files.keys(&ctx); }
         self.keys(&ctx, now);
         if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
             self.quiet = false;
         }
         let g = Grid::new(&ctx, SIZES[self.s.size % SIZES.len()]);
         let full = ui.max_rect();
+        self.main_rect = ctx.input(|i| i.viewport().inner_rect);
         ui.painter().rect_filled(full, 0.0, STAGE);
 
         // What the chrome is doing this frame.
@@ -3047,7 +3124,7 @@ impl eframe::App for App {
         let top = full.top() + if self.s.pin_ui { bar_h } else { 0.0 };
         let bottom = full.bottom() - if self.s.pin_ui { bar_h } else { 0.0 };
         let lib_on = self.lib.is_some();
-        let tree_on = self.s.tree && lib_on;
+        let tree_on = self.s.tree && self.s.dock.docked_count() > 0;
         let img_on = self.s.image || !tree_on;
         let dragging = ctx.is_being_dragged(Id::new("divider"));
 
@@ -3066,7 +3143,7 @@ impl eframe::App for App {
         self.focus.step(&ctx, focus_on, &want, work, now);
         let focused = self.focus.active();
 
-        let open_w = if lib_on { self.tree_width(&g, full) } else { 0.0 };
+        let open_w = self.tree_width(&g, full);
         let target = match (tree_on, img_on) {
             (false, _) => 0.0,
             (true, false) => full.width(),
@@ -3082,16 +3159,14 @@ impl eframe::App for App {
         let line_x = (full.left() + pw + gutter * 0.5).min(full.right() - 2.0);
         let panel = Rect::from_min_max(Pos2::new(full.left(), top), Pos2::new(full.left() + pw, bottom));
         let stage = Rect::from_min_max(Pos2::new((full.left() + pw + gutter).min(full.right()), top), Pos2::new(full.right(), bottom));
+        self.snap_zone = self.main_rect.map(|r| {
+            Rect::from_min_max(Pos2::new(r.left(), r.top() + top), Pos2::new(r.left() + if tree_on { pw.max(48.0) } else { (g.cw * 8.0).max(48.0) }, r.top() + bottom))
+        });
 
         let mut acts: Vec<Act> = Vec::new();
-        if !lib_on {
-            self.splash(ui.painter(), &g, full);
-        } else {
+        {
             if pw > 1.0 {
-                // Content rides the panel's right edge, so folding slides it
-                // away; given the whole window, it starts at the left.
-                let x0 = (panel.right() - open_w).min(panel.left());
-                self.tree_pane(ui, panel, x0, &g, now);
+                self.docked_trees(ui, panel, &g, now);
             }
             // The divider: drag it to set the tree's width, all the way left
             // to fold the tree, all the way right to fold the image;
@@ -3163,7 +3238,9 @@ impl eframe::App for App {
                     }
                 }
             }
-            if img_on && stage.width() > g.cw * 4.0 {
+            if !lib_on {
+                self.splash(ui.painter(), &g, stage);
+            } else if img_on && stage.width() > g.cw * 4.0 {
                 // In focus the picture meets the window's edges.
                 let pad = if focused { 0.0 } else { g.rh * 0.6 };
                 self.stage(ui, stage.shrink(pad), &g, now, focused);
@@ -3174,7 +3251,7 @@ impl eframe::App for App {
 
         // Fold tab: at the top of the divider, under the menu bar's band. It
         // arrives with the menu bar, or when the pointer comes near it.
-        if lib_on {
+        if self.files.browser.is_some() {
             let size = Vec2::new(g.cw * 1.8, g.rh * 2.0);
             let ty = full.top() + bar_h + g.rh * 0.5;
             let (x, glyph, act) = match (tree_on, img_on) {
@@ -3340,6 +3417,9 @@ impl eframe::App for App {
             self.act(&ctx, a, now);
         }
 
+        self.floating_trees(&ctx, now);
+        self.dock_preview(&ctx);
+
         self.typed = ctx.memory(|m| m.focused().is_some());
         self.want();
         let anim = !self.fly.is_empty()
@@ -3353,6 +3433,7 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.s.files_root = self.files.browser.as_ref().map(|b| b.tree.root.clone());
         self.s.focus_budget = Some([self.focus.budget.x, self.focus.budget.y]);
         self.s.home = self.focus.home.map(|(h, m)| ([h.x, h.y], m));
         eframe::set_value(storage, "rusted-calamari", &self.s);
