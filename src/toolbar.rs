@@ -109,7 +109,9 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// Draw the strip with its right edge at `top_right`. `alpha` is the
 /// shared interface fade; the strip slides in a few points as it fades in.
-pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32, tools: &[Tool<A>], alpha: f32, now: f64) -> Out<A> {
+/// A strip that isn't `live` takes no input.
+#[allow(clippy::too_many_arguments)]
+pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32, tools: &[Tool<A>], alpha: f32, live: bool, now: f64) -> Out<A> {
     let mut out = Out { click: None, hovered: false, rect: Rect::NOTHING };
     if tools.is_empty() || alpha < 0.01 {
         ctx.data_mut(|d| d.remove::<(Id, f64)>(Id::new("tool-tip-since")));
@@ -124,11 +126,11 @@ pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32
     Area::new(Id::new("toolbar"))
         .fixed_pos(pos)
         .order(Order::Foreground)
-        .interactable(alpha > 0.05)
+        .interactable(live && alpha > 0.05)
         .show(ctx, |ui| {
             // The body takes drags too, so a drag that starts on the strip
             // never reaches the image underneath.
-            let (body, bresp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+            let (body, bresp) = ui.allocate_exact_size(size, Sense::CLICK | Sense::DRAG);
             let p = ui.painter();
             theme::frame(p, body, alpha);
             for (x, row) in &rules {
@@ -138,7 +140,7 @@ pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32
             }
             for (i, (t, c)) in tools.iter().zip(&cells).enumerate() {
                 let r = c.translate(body.min.to_vec2());
-                let resp = ui.interact(r, Id::new("tool").with(t.id), Sense::click());
+                let resp = ui.interact(r, Id::new("tool").with(t.id), Sense::CLICK);
                 if button(ui, t, r, &resp, alpha, now) {
                     out.click = Some(t.act.clone());
                 }

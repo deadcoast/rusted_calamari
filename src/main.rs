@@ -6,6 +6,7 @@
 
 mod app;
 mod theme;
+mod focus;
 mod fonts;
 mod glyph;
 mod loader;
@@ -23,7 +24,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Rusted Calamari")
             .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([720.0, 480.0])
+            // Small enough for image focus to wrap a portrait picture.
+            .with_min_inner_size([320.0, 200.0])
             .with_decorations(false)
             .with_drag_and_drop(true),
         ..Default::default()

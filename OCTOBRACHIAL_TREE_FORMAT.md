@@ -14,8 +14,8 @@ design addition and is marked **[new]** where it first appears.
 
 ## 1. Anatomy
 
-```
-                                    ┌─ a.[_float_:6]                  ← beak, tier a
+```txt
+                                   ┌─ a.[_float_:6]                  ← beak, tier a
 ◙ [photos] ·············· 14 Σ259 ─┼─ b.[_fav_:3]                     ← beak, tier b
 │                                  └─ c.[1:9, 2:4, 3:7, 4:2]          ← beak, tier c
 ├─ [scans] ►12                                                        ← folded arm
@@ -31,7 +31,7 @@ design addition and is marked **[new]** where it first appears.
 ```
 
 | Part | What it is |
-|---|---|
+| --- | --- |
 | **Mantle** `◙` **[new]** | The root of the open library. Carries its loose files and `Σ` total. Its arms split above and below it so the body sits mid-screen. |
 | **Arm** | A plain subdirectory, hung on a spine. |
 | **Beak** | The category directories of a node (`_float_`, `_fav_`, `1`..`8`), collapsed into **one row per hier tier**: `c.[1:9, 2:4, 3:7]`. This is the request's `[img]->[cata]->[hier]` fan made literal: the beak is the set of slots the image in view can be filed into. Categories never appear as arms. |
@@ -47,7 +47,7 @@ beak, ordered top to bottom.
 OTF is coloured like source code. Each glyph run is a typed token:
 
 | Token | Colour rule |
-|---|---|
+| --- | --- |
 | `Trunk(depth)` | Spine and connector glyphs cycle a 6-colour ramp by depth, the way rainbow-bracket highlighting colours nesting. The octopus's arms read by colour before you read a name. |
 | `CatName(cat)` | The category's cid, bold. |
 | `Sucker(cat)` | The category's cid; loose files dim. |
@@ -66,7 +66,7 @@ A spine can hang its arms below the label (`├─ … └─`) or above it,
 mirrored: the first arm stays nearest the label, the farthest arm goes on
 top and takes the `┌─` corner.
 
-```
+```txt
 ├─ [2024]                    │  ┌─ [tokyo]
 │  ├─ [kyoto]                │  ├─ [osaka]
 │  ├─ [osaka]       ⇄        │  ├─ [kyoto]
@@ -110,14 +110,14 @@ fits (the divider is dragged in, the window narrows), it steps down a ladder
 and takes the first shape that fits:
 
 | Level | Change |
-|---|---|
+| --- | --- |
 | 0 | Full detail. |
 | 1, 2 | Sucker bars shorten to 6, then 3 cells. |
 | 3 | The beak stops fanning right and hangs under its label, on the spine, with double rules (`╞═`, last `╘═`). Every style converges on this one spine. |
 | 4 | Sucker bars go; the file count stays. |
 | 5–7 | Folder names are cut to 16, 10, then 6 columns (`[japa..]`); slot lists tighten (`c.[1:4,2,3:2]`, empty slots drop `:0`). |
 
-```
+```txt
 ◙ [photos] 3 Σ55
 ╞═ a.[_float_:2]
 ╘═ c.[1:4,2:1]
@@ -151,12 +151,12 @@ into view.
 ## 5. Styles
 
 | Setting | Beak | Arms |
-|---|---|---|
+| --- | --- | --- |
 | `Octobrachial Arm` | fanned off the label row | spine |
 | `Octobrachial Beak` | fanned, and arms join the same fan | no spine anywhere; the tree reads left to right like the request's `->` chains |
 | `Boxtobrachial` | tier rows in a box hooked by `──┤` | spine |
 
-```
+```txt
 ◙ [photos] ·· 14 Σ259 ──┤ b.[_fav_:3]            │
 ```
 
@@ -166,13 +166,13 @@ The window is an image browser and organizer in one: the image takes every
 pixel the layout can give it; everything else is chrome that arrives on
 hover and leaves on the next keystroke. The window has no system frame.
 
-```
+```txt
  hover top     ┌───────────────────────────────────────────────────────┐
  menu bar   →  │ ◙ Rusted Calamari File Edit View Settings Help  – □ ✕ │
                ├─────────────┬──┬──────────────────────────────────────┤
-               │ OTF tree    │ ││                             ╭──────╮ │
-               │ beside the  │ <│ ← divider + fold tab        │ ⌗ ⌗ϟ │ │ ← tool strip
-               │ image       │ ││             image           ╰──────╯ │
+               │ OTF tree    │ <│ ← fold tab                  ╭──────╮ │
+               │ beside the  │ ││                             │ ⌗ ⌗ϟ │ │ ← tool strip
+               │ image       │ ││ ← divider   image           ╰──────╯ │
                │             │ ││                                      │
                ├─────────────┴──┴──────────────────────────────────────┤
  hover bottom  │ folder │ n of m │ name │ WxH │ MB │ zoom  z 1  x 2 .. │
@@ -221,15 +221,55 @@ hover and leaves on the next keystroke. The window has no system frame.
   them. A redone move leaves the folder the way the first move did (the
   next image steps up). Anything new clears what was undone.
 
-- **Fold.** The tree sits beside the image. Its edge carries a tab that
-  appears when the pointer nears it: `<` folds the tree away, `>` brings it
-  back (`Tab` does both). The tree's width animates and the image stage
-  takes whatever is left, so folding grows the image in the same motion.
+- **Fold.** The tree sits beside the image. A tab at the top of the
+  divider, just under the menu bar's band, arrives with the menu bar or
+  when the pointer comes near it: `<` folds the tree away (image focus,
+  below), `>` at the window's left edge brings it back. `Tab` does both.
+  The image folds too (`Shift+Tab`, View > Fold the image): the tree takes
+  the whole window and the tab moves to the right edge, where `<` brings
+  the image back. One of the two always stays.
 - **Divider.** A two-cell margin separates the tree from the image, with a
-  1px rule down its centre. The margin opens and closes with the fold. On
-  hover the rule turns rust, thickens and shows a grip; drag it to set the
-  tree's width, double-click it to go back to hugging the tree. The fold
-  tab sits on it.
+  1px rule down its centre. The margin opens and closes with either fold.
+  On hover the rule turns rust, thickens and shows a grip; drag it to set
+  the tree's width, double-click it to go back to hugging the tree. Drag it
+  all the way left and the tree folds; all the way right and the image
+  folds; the window's edge on the side that will fold tints rust while the
+  pointer is past it, and dragging back undoes the fold before you let go.
+  With the image folded, grab the window's right edge to pull it back.
+- **Image focus.** Folding the tree makes the window the picture's frame.
+  The window collapses round the image, edge to edge, with no padding and
+  no bars: a portrait picture gets a portrait window. As you browse it
+  takes each image's shape, keeping its centre. The picture fills a size
+  budget: the window as it was when the tree folded, scaled whenever you
+  resize the window by hand (the side you drag sets the scale, and the
+  window settles back round the picture a moment after you stop). The
+  maximize button, `F11` and a double-click on the top bar step through
+  three sizes: **Fit** (the budget), **Large** (the same, as large as the
+  screen's work area allows, centred on it) and **Full** (true full screen,
+  the picture centred, with bars only where its shape differs from the
+  screen's); the next step goes back to Fit, as does `Esc` in full screen.
+  The maximize button's icon says where it goes next. A window or menu that
+  needs more room than the picture gives (Help beside a portrait picture)
+  grows the window while it is open. The menu bar narrows with the window:
+  the path goes first, then the name beside the logo, then Help and
+  Settings, which keep their keys; the status line's chips keep their keys
+  and drop their names. The category colour, which has no room under the
+  picture, becomes a 2px frame inside its edge. Unfolding the tree gives
+  the window back its size from before (re-maximized, if it was). The
+  budget and that size are remembered between sessions. On Windows the
+  work area comes from the system and excludes the taskbar; elsewhere it is
+  estimated from the monitor size.
+- **Crops come first.** While Crop or DANGER crop is on, the floating
+  interface yields to the picture: with the pointer on or at the picture,
+  or a frame being dragged, the menu bar, status line, tool strip and fold
+  tab neither come up nor take clicks, and the window's resize bands are
+  off, so every edge of the picture can be reached, including in focus,
+  where the picture's edges are the window's. Nothing is padded or shrunk
+  to make room. A menu or window opened on purpose (`Alt+F`, `.`) still
+  opens, and pinned bars keep their own room. The crop bar sits under the
+  picture's middle, or over it when the frame's bottom edge runs under it,
+  and fades and lets the pointer through whenever the pointer comes within
+  reach of a frame edge or corner.
 - **Pinned.** `PIN_UI` keeps the menu bar and status line up, and the stage
   shrinks to sit between them instead of under them.
 - **Chrome.** Menus and dialogs share one frame: a bold 2px rule with
@@ -237,7 +277,9 @@ hover and leaves on the next keystroke. The window has no system frame.
   face carries those glyphs). The rule is the window's edge: the background
   fills to its outer line and stops there; only a blurred shadow falls
   beyond it. Dialogs open with ` ■ Title ` on their first row (the square
-  closes them) and a divider under it. Every divider stops one cell short
+  closes them) and a divider under it. Nothing in the interface takes
+  keyboard focus except text fields, so `Tab` and the arrow keys always
+  belong to the viewer. Every divider stops one cell short
   of the rule on each side. Menus and dialogs fade and lift in as they
   open. Shortcuts sit right-aligned; the hovered row inverts in rust.
 - **Category rows in Settings.** Each key is a keycap in its category's
@@ -263,8 +305,8 @@ hover and leaves on the next keystroke. The window has no system frame.
   flashes even while the line is hidden.
 
 | You do | The window does |
-|---|---|
-| `z x c v` / `SPACE` (any key bound to a category) | The image is moved on disk into `<active>/<category>/` and drops toward its chip; the slot token in the tree flashes and its count ticks up; the next image is already up. A name clash gets ` (2)`; nothing is overwritten. Pending edits are saved first so they travel with the file. |
+| --- | --- |
+| `z x c v` / `SPACE` (any key bound to a category) | The image is moved on disk into `<active>/<category>/` and drops toward its chip; the slot token in the tree flashes and its count ticks up; the next image is already up. A name clash gets `(2)`; nothing is overwritten. Pending edits are saved first so they travel with the file. |
 | tree: click a slot token | Same move, by mouse. |
 | tree: right-click a slot token | Browse that category folder; the token shows `◄n/m`. |
 | tree: click a folder | Browse it; it opens through the tide; click again to fold it. |
@@ -280,8 +322,8 @@ hover and leaves on the next keystroke. The window has no system frame.
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo. |
 | `Delete` | Move to `<library>/.calamari_trash/`. |
 | wheel / drag / `0` / `Ctrl+1` / double-click | Zoom / pan / fit / actual size / fit. |
-| `Tab` · `H` · `.` · `Esc` · `Alt+F/E/V` | Fold tree · keys · settings · close · open a menu. |
-| `F11` · top bar drag · top bar double-click | Full screen · move the window · maximize or restore. |
+| `Tab` · `Shift+Tab` · `H` · `.` · `Esc` · `Alt+F/E/V` | Fold the tree (image focus) · fold the image · keys · settings · close (or leave full screen) · open a menu. |
+| `F11` · top bar drag · top bar double-click | Full screen (in focus: Fit, Large, Full) · move the window · maximize (in focus: the same steps as F11). |
 | `Ctrl+O` · `Ctrl+I` · drop a folder or files | Open a folder · import images into the active folder · either. |
 | close the window with pending edits | A dialog offers save all and quit, quit without saving, or cancel. |
 
@@ -297,8 +339,9 @@ move into it. Other folders show only the categories they actually contain.
 Menus: File (open folder, import images, save, save all, export as, revert
 edits, import/export categories, export manifest `.csv`, export categorised
 images, quit), Edit (undo, redo, crop, DANGER crop, rotate, flip, move to
-trash), View (fold the tree, fit, actual size, title, toolbar, tree style,
-pin the interface, full screen), Settings, Help.
+trash), View (fold the tree, fold the image, fit, actual size, title,
+toolbar, tree style, pin the interface, full screen or the next focus
+size), Settings, Help.
 Settings holds PIN_UI, the tree, title and toolbar toggles, the twelve
 int10h faces, size, style, and `[create]` > `[classification_category]`
 listing every category: click a keycap to rebind it, double-click a colour
@@ -310,7 +353,7 @@ The window reopens the last library and settings on launch.
 
 Category table file, `<library>/.calamari` **[new]**:
 
-```
+```txt
 # key  name     cid      tier
 spc    _float_  #E6D463  a
 -      _fav_    #F0A35E  b

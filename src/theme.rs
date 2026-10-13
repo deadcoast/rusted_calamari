@@ -29,6 +29,11 @@ pub const RUST_HI: Color32 = Color32::from_rgb(0xe3, 0x88, 0x4a);
 pub const WARN: Color32 = Color32::from_rgb(0xe0, 0x5a, 0x5a);
 pub const SHADOW: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 120);
 
+// Every pointer target here senses CLICK and DRAG without FOCUSABLE. egui
+// moves keyboard focus between focusable widgets on Tab and the arrow keys,
+// and the app owns those keys: Tab folds the tree, the arrows browse. Only
+// text fields take focus.
+
 /// A run of text, optionally carrying an action.
 #[derive(Clone)]
 pub struct R<A> {
@@ -163,7 +168,8 @@ const HEAD: f32 = 2.0;
 /// A window: bold rounded rule as its edge, ` ■ Title ` on the first row
 /// (the square closes it), a divider, body rows. Rows with actions
 /// highlight on hover; runs with actions invert on hover (buttons); runs
-/// with double-click actions lift on hover.
+/// with double-click actions lift on hover. A window that isn't `live`
+/// takes no input: the pointer reaches whatever is under it.
 #[allow(clippy::too_many_arguments)]
 pub fn dialog<A: Clone>(
     ctx: &egui::Context,
@@ -174,6 +180,7 @@ pub fn dialog<A: Clone>(
     rows: &[Row<A>],
     min_cols: usize,
     alpha: f32,
+    live: bool,
     close: A,
     mut extra: impl FnMut(&mut Ui, Pos2),
 ) -> Out<A> {
@@ -182,10 +189,10 @@ pub fn dialog<A: Clone>(
     Area::new(Id::new(id))
         .fixed_pos(pos + Vec2::new(0.0, lift))
         .order(Order::Foreground)
-        .interactable(alpha > 0.05)
+        .interactable(live && alpha > 0.05)
         .show(ctx, |ui| {
             let size = dialog_size(g, title, rows, min_cols);
-            let (body, resp) = ui.allocate_exact_size(size, Sense::click());
+            let (body, resp) = ui.allocate_exact_size(size, Sense::CLICK);
             let p = ui.painter();
             frame(p, body, alpha);
             let hover = resp.hover_pos();
@@ -286,7 +293,7 @@ pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, it
         .order(Order::Foreground)
         .interactable(alpha > 0.05)
         .show(ctx, |ui| {
-            let (body, resp) = ui.allocate_exact_size(Vec2::new(w as f32 * g.cw, (items.len() as f32 + 1.0) * g.rh), Sense::click());
+            let (body, resp) = ui.allocate_exact_size(Vec2::new(w as f32 * g.cw, (items.len() as f32 + 1.0) * g.rh), Sense::CLICK);
             let p = ui.painter();
             frame(p, body, alpha);
             let top = body.top() + g.rh * 0.5;

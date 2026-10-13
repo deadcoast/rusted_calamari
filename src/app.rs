@@ -2,6 +2,7 @@
 //! window. The Octobrachial Tree folds out beside it; every other control
 //! stays hidden until the pointer goes looking for it.
 
+use crate::focus::{self, Focus, Stage};
 use crate::fonts::{self, FACES, SIZES};
 use crate::glyph::{run_at, Grid, Run};
 use crate::loader::{Loader, Slot};
@@ -51,6 +52,20 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgba_premultiplied(f(a.r(), b.r()), f(a.g(), b.g()), f(a.b(), b.b()), f(a.a(), b.a()))
 }
 
+/// A path without Windows' verbatim prefix: `canonicalize` there returns
+/// `\\?\C:\...`, which reads badly in the menu bar and never equals the
+/// `C:\...` paths that dialogs and drag and drop hand us.
+fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => p,
+    }
+}
+
 /// A file DANGER crop can write back in place (GIF keeps its frames, so
 /// it only exports).
 fn writable(name: &str) -> bool {
@@ -76,8 +91,15 @@ pub struct Settings {
     pub size: usize,
     pub style: usize,
     pub pin_ui: bool,
-    /// Tree folded out beside the image.
+    /// Tree folded out beside the image. Folded, the app goes into image
+    /// focus (see `focus`).
     pub tree: bool,
+    /// The image beside the tree; folded, the tree takes the window.
+    pub image: bool,
+    /// Image focus: the size pictures fill, and the window to give back
+    /// when the tree unfolds (size, maximized).
+    pub focus_budget: Option<[f32; 2]>,
+    pub home: Option<([f32; 2], bool)>,
     /// Width the user dragged the tree to; None hugs the tree.
     pub panel_w: Option<f32>,
     /// Folder and position written over the image ("japan 003").
@@ -89,7 +111,20 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { font: 0, size: 2, style: 0, pin_ui: false, tree: true, panel_w: None, title: false, toolbar: false, library: None }
+        Settings {
+            font: 0,
+            size: 2,
+            style: 0,
+            pin_ui: false,
+            tree: true,
+            image: true,
+            focus_budget: None,
+            home: None,
+            panel_w: None,
+            title: false,
+            toolbar: false,
+            library: None,
+        }
     }
 }
 
@@ -202,6 +237,8 @@ enum Act {
     Edit(Op),
     Trash,
     Tree,
+    /// Fold or unfold the image (the tree takes the window).
+    Image,
     Fit,
     Actual,
     Style(bool),
@@ -330,6 +367,13 @@ pub struct App {
     toolbar_rect: Option<Rect>,
     /// The window is full screen (for the View menu's wording).
     win_full: bool,
+    /// Image focus: the window as the picture's frame.
+    focus: Focus,
+    /// Room the open dialogs, menus and popovers asked for last frame.
+    need: Vec2,
+    /// A crop is on and the pointer is at the picture: the floating
+    /// interface steps aside (see `ui`).
+    yielding: bool,
     quitting: bool,
 }
 
@@ -337,6 +381,8 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, arg: Option<PathBuf>) -> App {
         let s: Settings = cc.storage.and_then(|st| eframe::get_value(st, "rusted-calamari")).unwrap_or_default();
         let app_font = s.font;
+        let focus_budget = s.focus_budget.map(Vec2::from);
+        let focus_home = s.home.map(|(h, m)| (Vec2::from(h), m));
         // Fonts go in before the first frame: the icon families must exist
         // the first time anything draws an icon.
         fonts::install(&cc.egui_ctx, s.font);
@@ -388,6 +434,9 @@ impl App {
             tools_woke: None,
             toolbar_rect: None,
             win_full: false,
+            focus: Focus::new(focus_budget, focus_home),
+            need: Vec2::ZERO,
+            yielding: false,
             quitting: false,
         };
         let start = arg.or_else(|| app.s.library.clone()).filter(|p| p.is_dir());
@@ -420,7 +469,7 @@ impl App {
 
     fn open_library(&mut self, p: &Path, now: f64) {
         self.settle(true);
-        let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let p = plain(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
         match Tree::scan(&p, config::load(&p)) {
             Ok(mut tree) => {
                 balance(&mut tree, self.style(), &Ctx::viewer(0, 0));
@@ -947,7 +996,7 @@ impl App {
     /// browsing so the image doesn't twitch as sucker rows shorten.
     fn tree_width(&mut self, g: &Grid, full: Rect) -> f32 {
         if let Some(w) = self.s.panel_w {
-            return w.clamp(g.cw * 24.0, full.width() * 0.6);
+            return w.clamp(g.cw * 24.0, (full.width() - g.cw * 24.0).max(g.cw * 24.0));
         }
         let Some(lib) = self.lib.as_ref() else { return 0.0 };
         let f = render(&lib.tree, self.style(), &Self::ctx_of(lib, 0));
@@ -995,7 +1044,10 @@ impl App {
         let style = self.style();
         let ctx = ui.ctx().clone();
         let Some(lib) = self.lib.as_ref() else { return };
-        let inner = Rect::from_min_max(Pos2::new(x0 + g.cw * 1.5, rect.top() + g.rh), Pos2::new(rect.right() - g.cw, rect.bottom() - g.rh));
+        // Rows start below the menu bar's band and end above the status
+        // line's, so the bars never sit on the root row when they appear.
+        let (pad_t, pad_b) = if self.s.pin_ui { (g.rh, g.rh) } else { (g.rh * 1.75, g.rh * 1.75) };
+        let inner = Rect::from_min_max(Pos2::new(x0 + g.cw * 1.5, rect.top() + pad_t), Pos2::new(rect.right() - g.cw, rect.bottom() - pad_b));
         // The tree reshapes to the width it has instead of running off it;
         // the tide reflows to the same width, so clicks land where they show.
         let cols = (inner.width() / g.cw).floor().max(8.0) as usize;
@@ -1015,7 +1067,7 @@ impl App {
             }
         }
 
-        let resp = ui.interact(rect, Id::new("otf-pane"), Sense::click_and_drag());
+        let resp = ui.interact(rect, Id::new("otf-pane"), Sense::CLICK | Sense::DRAG);
         let slack = (frame.width() as f32 * g.cw - inner.width()).max(0.0);
         if resp.hovered() {
             self.tree_dx += ui.input(|i| i.smooth_scroll_delta.x);
@@ -1195,7 +1247,7 @@ impl App {
 
     // ── stage ────────────────────────────────────────────────────────
 
-    fn stage(&mut self, ui: &mut egui::Ui, rect: Rect, g: &Grid, now: f64) {
+    fn stage(&mut self, ui: &mut egui::Ui, rect: Rect, g: &Grid, now: f64, focused: bool) {
         self.img_rect = None;
         let Some(lib) = self.lib.as_ref() else { return };
         let node = &lib.tree.nodes[lib.active];
@@ -1210,7 +1262,7 @@ impl App {
         let path = lib.tree.dir(lib.active).join(&name);
         let cropping = self.crop.as_ref().is_some_and(|c| c.path == path);
         let danger = self.danger && !cropping && writable(&name);
-        let resp = ui.interact(rect, Id::new("stage"), Sense::click_and_drag());
+        let resp = ui.interact(rect, Id::new("stage"), Sense::CLICK | Sense::DRAG);
         let full_uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
 
         // Pending edits (always made on the file as written), then a DANGER
@@ -1274,8 +1326,11 @@ impl App {
             r = Rect::from_min_max(from.min.lerp(r.min, e), from.max.lerp(r.max, e));
             ui.ctx().request_repaint();
         }
-        // Lift the picture off the stage.
-        p.rect_filled(r.translate(Vec2::new(0.0, 5.0)).expand(3.0), 3.0, SHADOW);
+        // Lift the picture off the stage; in focus it is the window, edge to
+        // edge, with nothing to lift it off.
+        if !focused {
+            p.rect_filled(r.translate(Vec2::new(0.0, 5.0)).expand(3.0), 3.0, SHADOW);
+        }
         p.image(tex.id(), r, uv, Color32::WHITE);
         self.img_rect = Some(r);
         if let Some((_, age)) = grow
@@ -1285,10 +1340,17 @@ impl App {
             p.rect_stroke(r.expand(2.0 + 6.0 * k), 2.0, Stroke::new(2.0 * (1.0 - k), WARN.gamma_multiply(1.0 - k)), StrokeKind::Outside);
             ui.ctx().request_repaint();
         }
-        // The image's cid, held in the app: a rule under the picture.
-        if let Some(c) = self.current_cat() {
-            let bar = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 6.0), Vec2::new(r.width(), 3.0));
-            p.rect_filled(bar, 0.0, rgb(self.lib.as_ref().unwrap().tree.cats[c].cid));
+        // The image's cid, held in the app: a rule under the picture, or in
+        // focus, where there is no room under it, a frame just inside it.
+        if let Some(c) = self.current_cat()
+            && let Some(cat) = self.lib.as_ref().and_then(|l| l.tree.cats.get(c))
+        {
+            if focused {
+                p.rect_stroke(r, 0.0, Stroke::new(2.0, rgb(cat.cid)), StrokeKind::Inside);
+            } else {
+                let bar = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 6.0), Vec2::new(r.width(), 3.0));
+                p.rect_filled(bar, 0.0, rgb(cat.cid));
+            }
         }
         if self.s.title && !cropping {
             self.title_overlay(&p, g, r);
@@ -1400,7 +1462,7 @@ impl App {
         let to_norm = |q: Pos2| [((q.x - ir.left()) / ir.width()).clamp(0.0, 1.0), ((q.y - ir.top()) / ir.height()).clamp(0.0, 1.0)];
         let ratio = match ASPECTS[c.aspect].1 {
             x if x < 0.0 => Some(px[0] as f32 / px[1] as f32),
-            x if x == 0.0 => None,
+            0.0 => None,
             x => Some(x),
         };
         let hit = |s: Rect, q: Pos2| -> Grab {
@@ -1440,8 +1502,11 @@ impl App {
                 Grab::New => CursorIcon::Crosshair,
             });
         }
+        // Hit-test where the button went down, not where the drag was
+        // recognised a few points later: an edge grabbed at the picture's
+        // border stays that edge.
         if resp.drag_started()
-            && let Some(q) = resp.interact_pointer_pos()
+            && let Some(q) = ui.ctx().input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
         {
             c.grab = Some((hit(s, q), c.r, q));
         }
@@ -1677,12 +1742,23 @@ impl App {
                     self.menu = None;
                     None
                 }
-                Key::Escape => (!matches!(self.dialog, Dialog::None)).then_some(Act::Close),
+                Key::Escape if !matches!(self.dialog, Dialog::None) => Some(Act::Close),
+                // Nothing else to close: Esc leaves full screen.
+                Key::Escape if self.win_full => {
+                    if self.focus.active() {
+                        self.focus.leave_full(ctx, now);
+                    } else {
+                        window::toggle_fullscreen(ctx);
+                    }
+                    None
+                }
+                Key::Escape => None,
                 Key::F if modifiers.alt => Some(Act::Menu(Menu::File)),
                 Key::E if modifiers.alt => Some(Act::Menu(Menu::Edit)),
                 Key::V if modifiers.alt => Some(Act::Menu(Menu::View)),
                 Key::H if !cmd => Some(Act::Help),
                 Key::Period => Some(Act::Settings),
+                Key::Tab if sh => Some(Act::Image),
                 Key::Tab => Some(Act::Tree),
                 Key::Num0 if !cmd => Some(Act::Fit),
                 Key::Num1 if cmd => Some(Act::Actual),
@@ -1804,7 +1880,23 @@ impl App {
             }
             Act::Edit(op) => self.push_op(ctx, op, now),
             Act::Trash => self.trash(now),
-            Act::Tree => self.s.tree = !self.s.tree,
+            // Tree and image fold in turn; one of them always stays.
+            Act::Tree => {
+                if self.s.image {
+                    self.s.tree = !self.s.tree;
+                } else {
+                    self.s.image = true;
+                    self.s.tree = true;
+                }
+            }
+            Act::Image => {
+                if self.s.tree {
+                    self.s.image = !self.s.image;
+                } else {
+                    self.s.tree = true;
+                    self.s.image = true;
+                }
+            }
             Act::Fit => self.reset_view(),
             Act::Actual => {
                 if let (Some(r), Some(f)) = (self.img_rect, self.current_px()) {
@@ -1929,6 +2021,9 @@ impl App {
                 self.s.toolbar = !self.s.toolbar;
                 self.tools_woke = self.s.toolbar.then_some(now);
             }
+            // In image focus the maximize button and F11 step through the
+            // focus sizes instead.
+            Act::Window(Ctl::Maximize) | Act::Fullscreen if self.focus.active() => self.focus.cycle(ctx, now),
             Act::Window(c) => window::apply(ctx, c),
             Act::Fullscreen => window::toggle_fullscreen(ctx),
         }
@@ -2043,7 +2138,9 @@ impl App {
     /// The menu bar: logo, menus with their Alt letter lit, and on the
     /// right anything unsaved, the library path and the window buttons. It
     /// is also the window's title bar: drag its empty part to move the
-    /// window, double-click it to maximize.
+    /// window, double-click it to maximize. In a narrow window (image focus
+    /// round a portrait picture) the path goes first, then the name beside
+    /// the logo, then Help and Settings (`H`, `.`), never File, Edit, View.
     fn menubar(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
         let h = g.rh * 1.5;
         let slide = (1.0 - alpha) * h * 0.5;
@@ -2068,26 +2165,48 @@ impl App {
         if let Some(l) = &self.lib {
             right.push(run(l.tree.root.display().to_string(), DIM));
         }
+        let ctl_w = (h * 1.6).round();
+        let room = full.width() - ctl_w * 3.0 - g.cw * 2.0;
+        let cols = |logo: usize, n: usize| (1 + logo + titles[..n].iter().map(|t| t.0.chars().count() + 2).sum::<usize>()) as f32 * g.cw;
+        let logo = if cols(20, 5) <= room { 20 } else { 3 };
+        let mut shown = 5;
+        while shown > 3 && cols(logo, shown) > room {
+            shown -= 1;
+        }
+        let max_glyph = if self.focus.active() {
+            match self.focus.stage {
+                Stage::Fit => ph::CORNERS_OUT,
+                Stage::Large => ph::FRAME_CORNERS,
+                Stage::Full => ph::CORNERS_IN,
+            }
+        } else {
+            window::max_glyph(ctx)
+        };
+        let live = !self.yielding || self.s.pin_ui || self.menu.is_some() || !matches!(self.dialog, Dialog::None);
         Area::new(Id::new("menubar"))
             .fixed_pos(full.min - Vec2::new(0.0, slide))
             .order(Order::Foreground)
-            .interactable(alpha > 0.05)
+            .interactable(live && alpha > 0.05)
             .show(ctx, |ui| {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::click_and_drag());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::CLICK | Sense::DRAG);
                 let p = ui.painter();
                 p.rect_filled(rect, 0.0, IRON.gamma_multiply(alpha));
                 p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, EDGE.gamma_multiply(alpha)));
-                let (ctl, span) = window::controls(ui, rect, (h * 1.6).round(), alpha);
+                let (ctl, span) = window::controls(ui, rect, ctl_w, alpha, max_glyph);
                 if let Some(c) = ctl {
                     act = Some(Act::Window(c));
                 }
                 let p = ui.painter();
                 let y = rect.top() + (h - g.rh) * 0.5;
                 let mut x = rect.left() + g.cw;
-                g.line(p, Pos2::new(x, y), &[("◙ ".into(), RUST_HI), ("Rusted Calamari".into(), TEXT)], alpha);
-                x += g.cw * 20.0;
+                if logo == 20 {
+                    g.line(p, Pos2::new(x, y), &[("◙ ".into(), RUST_HI), ("Rusted Calamari".into(), TEXT)], alpha);
+                } else {
+                    g.text(p, Pos2::new(x, y), "◙", RUST_HI, alpha);
+                }
+                x += g.cw * logo as f32;
                 let hover = resp.hover_pos();
-                for (t, a, open) in titles {
+                for &(t, a, open) in &titles[..shown] {
                     let w = (t.chars().count() + 2) as f32 * g.cw;
                     let cell = Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, h));
                     let hot = hover.is_some_and(|q| cell.contains(q));
@@ -2110,7 +2229,10 @@ impl App {
                 let rw = Grid::cols(&right) as f32 * g.cw;
                 let rx = (span.left() - rw - g.cw * 2.0).max(x + g.cw * 3.0);
                 let clip = Rect::from_min_max(Pos2::new(x + g.cw, rect.top()), Pos2::new(span.left() - g.cw, rect.bottom()));
-                g.line(&p.with_clip_rect(clip), Pos2::new(rx, y), &right, alpha);
+                // The path only where it has room to say something.
+                if clip.width() > g.cw * 12.0 {
+                    g.line(&p.with_clip_rect(clip), Pos2::new(rx, y), &right, alpha);
+                }
                 let on_spot = |q: Pos2| spots.iter().any(|(a, b, _)| q.x >= *a && q.x < *b) || span.contains(q);
                 if resp.clicked()
                     && let Some(q) = resp.interact_pointer_pos()
@@ -2214,6 +2336,7 @@ impl App {
             ],
             Menu::View => vec![
                 it(if self.s.tree { "Fold the tree" } else { "Unfold the tree" }, "Tab", Act::Tree, lib),
+                it(if self.s.image { "Fold the image" } else { "Unfold the image" }, "Shift+Tab", Act::Image, lib),
                 it("Fit to window", "0", Act::Fit, has_img),
                 it("Actual size", "Ctrl+1", Act::Actual, has_img),
                 Item::Rule,
@@ -2222,7 +2345,17 @@ impl App {
                 it(&format!("Tree style: {}", STYLE_NAMES[self.s.style % 3]), "", Act::Style(true), true),
                 it(if self.s.pin_ui { "Let the interface fade" } else { "Pin the interface" }, "", Act::Pin, true),
                 Item::Rule,
-                it(if self.win_full { "Leave full screen" } else { "Full screen" }, "F11", Act::Fullscreen, true),
+                it(
+                    match (self.focus.active(), self.focus.stage, self.win_full) {
+                        (true, Stage::Fit, _) => "Enlarge",
+                        (true, Stage::Large, _) => "Full screen",
+                        (true, Stage::Full, _) | (false, _, true) => "Leave full screen",
+                        (false, _, false) => "Full screen",
+                    },
+                    "F11",
+                    Act::Fullscreen,
+                    true,
+                ),
             ],
         }
     }
@@ -2262,7 +2395,11 @@ impl App {
         }
         let cats: Vec<(usize, String, String, Color32)> =
             lib.tree.cats.iter().enumerate().filter_map(|(i, c)| c.key.clone().map(|k| (i, k, c.name.clone(), rgb(c.cid)))).collect();
-        let chip_w = |k: &str, nm: &str| (k.chars().count() + nm.chars().count() + 4) as f32 * g.cw;
+        // In a narrow window the chips drop their names and keep the keys.
+        let named = |k: &str, nm: &str| (k.chars().count() + nm.chars().count() + 4) as f32 * g.cw;
+        let full_w: f32 = cats.iter().map(|(_, k, nm, _)| named(k, nm) + g.cw).sum();
+        let compact = full_w > full.width() * 0.55;
+        let chip_w = |k: &str, nm: &str| if compact { (k.chars().count() + 2) as f32 * g.cw } else { named(k, nm) };
         let rw: f32 = cats.iter().map(|(_, k, nm, _)| chip_w(k, nm) + g.cw).sum();
         let y0 = full.bottom() - h;
         let start = full.right() - rw - g.cw;
@@ -2285,9 +2422,9 @@ impl App {
         Area::new(Id::new("statusbar"))
             .fixed_pos(Pos2::new(full.left(), y0 + slide))
             .order(Order::Foreground)
-            .interactable(alpha > 0.05)
+            .interactable((!self.yielding || self.s.pin_ui) && alpha > 0.05)
             .show(ctx, |ui| {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::CLICK);
                 let p = ui.painter();
                 p.rect_filled(rect, 0.0, IRON.gamma_multiply(alpha));
                 p.line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, EDGE.gamma_multiply(alpha)));
@@ -2303,7 +2440,11 @@ impl App {
                     p.rect_filled(cell, 2.0, (if hot { IRON_HI } else { STAGE }).gamma_multiply(alpha));
                     let kw = (k.chars().count() + 2) as f32 * g.cw;
                     p.rect_filled(Rect::from_min_size(cell.min, Vec2::new(kw, cell.height())), 2.0, c.gamma_multiply(alpha));
-                    g.line(p, Pos2::new(x, y), &[(format!(" {k} "), STAGE), (format!(" {nm}"), *c)], alpha);
+                    if compact {
+                        g.text(p, Pos2::new(x, y), &format!(" {k} "), STAGE, alpha);
+                    } else {
+                        g.line(p, Pos2::new(x, y), &[(format!(" {k} "), STAGE), (format!(" {nm}"), *c)], alpha);
+                    }
                     if resp.clicked()
                         && let Some(q) = resp.interact_pointer_pos()
                         && cell.contains(q)
@@ -2321,34 +2462,36 @@ impl App {
         act
     }
 
-    /// The fold tab on the tree's edge: `<` folds the tree away, `>` brings
-    /// it back. It comes and goes with the rest of the interface.
-    fn fold_tab(&mut self, ctx: &egui::Context, g: &Grid, edge_x: f32, mid_y: f32, alpha: f32) -> Option<Act> {
+    /// The fold tab, at the top of the divider just under the menu bar's
+    /// band, so it arrives with the menu bar. `<` folds the tree away (image
+    /// focus), `>` brings it back from the window's left edge; with the image
+    /// folded it sits on the right edge and `<` brings the image back.
+    fn fold_tab(&mut self, ctx: &egui::Context, g: &Grid, r: Rect, glyph: &str, act_on: Act, alpha: f32) -> Option<Act> {
         if alpha < 0.01 {
             return None;
         }
         let mut act = None;
-        let size = Vec2::new(g.cw * 1.8, g.rh * 3.0);
-        let glyph = if self.s.tree { "<" } else { ">" };
-        // Centred on the divider; flush to the window edge when folded.
-        let x = (edge_x - size.x * 0.5).max(0.0);
         Area::new(Id::new("fold-tab"))
-            .fixed_pos(Pos2::new(x, mid_y - size.y * 0.5))
+            .fixed_pos(r.min - Vec2::new(0.0, (1.0 - alpha) * g.rh * 0.4))
             .order(Order::Foreground)
-            .interactable(alpha > 0.05)
+            .interactable(!self.yielding && alpha > 0.05)
             .show(ctx, |ui| {
-                let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(r.size(), Sense::CLICK);
                 let p = ui.painter();
                 let hot = resp.hovered();
-                p.rect_filled(rect.translate(Vec2::new(2.0, 3.0)), 2.0, SHADOW.gamma_multiply(alpha));
-                p.rect_filled(rect, 2.0, (if hot { RUST } else { IRON }).gamma_multiply(alpha));
-                p.rect_stroke(rect, 2.0, Stroke::new(1.0, EDGE.gamma_multiply(alpha)), StrokeKind::Inside);
-                g.text(p, rect.center() - Vec2::new(g.cw * 0.5, g.rh * 0.5), glyph, if hot { STAGE } else { RUST_HI }, alpha);
+                let h = ctx.animate_bool_with_time(Id::new("fold-tab-hot"), hot, 0.1);
+                let d = ctx.animate_bool_with_time(Id::new("fold-tab-down"), resp.is_pointer_button_down_on(), 0.05);
+                p.add(theme::shadow(alpha * 0.8).as_shape(rect, 4.0));
+                p.rect_filled(rect, 4.0, lerp_color(IRON, RUST, h).gamma_multiply(alpha));
+                p.rect_stroke(rect, 4.0, Stroke::new(1.0, EDGE.gamma_multiply(alpha * (1.0 - h))), StrokeKind::Inside);
+                // The glyph leans the way the fold goes while hovered.
+                let lean = if glyph == "<" { -1.5 } else { 1.5 } * h * (1.0 - d);
+                g.text(p, rect.center() - Vec2::new(g.cw * 0.5 - lean, g.rh * 0.5 - d), glyph, lerp_color(RUST_HI, STAGE, h), alpha);
                 if hot {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
                 if resp.clicked() {
-                    act = Some(Act::Tree);
+                    act = Some(act_on);
                 }
                 self.chrome_hover |= resp.contains_pointer();
             });
@@ -2404,7 +2547,7 @@ impl App {
         rows.push(Row::new(vec![r("Click a key or double-click a colour to change it.", DIM)]));
         let size = theme::dialog_size(g, "Settings", &rows, 0);
         let pos = Pos2::new(full.center().x - size.x * 0.5, full.top() + g.rh * 3.0);
-        let o = dialog(ctx, g, "settings", pos, "Settings", &rows, 0, alpha, Act::Close, |_, _| {});
+        let o = dialog(ctx, g, "settings", pos, "Settings", &rows, 0, alpha, true, Act::Close, |_, _| {});
         self.chrome_hover |= o.hovered;
         let now = ctx.input(|x| x.time);
         if let Some((Act::CidEdit(i), at)) = o.double
@@ -2460,7 +2603,7 @@ impl App {
         let pos = ed.at.left_bottom() + Vec2::new(-g.cw * 2.0 + shake, 6.0);
         let pulse = 0.5 + 0.5 * ((now - ed.opened) as f32 * 5.0).cos();
         let area = Area::new(Id::new("key-edit")).fixed_pos(pos).order(Order::Tooltip).show(ctx, |ui| {
-            let (body, _) = ui.allocate_exact_size(size, Sense::click_and_drag());
+            let (body, _) = ui.allocate_exact_size(size, Sense::CLICK | Sense::DRAG);
             let p = ui.painter();
             theme::frame(p, body, 1.0);
             let o = body.min + Vec2::new(g.cw * 2.0, g.rh * 0.5);
@@ -2512,7 +2655,7 @@ impl App {
         let (mut done, mut revert) = (false, false);
         let font = g.font.clone();
         let button = |ui: &mut egui::Ui, t: &str, col: Color32| {
-            let r = ui.add(egui::Label::new(egui::RichText::new(t).font(font.clone()).color(col)).sense(Sense::click()));
+            let r = ui.add(egui::Label::new(egui::RichText::new(t).font(font.clone()).color(col)).sense(Sense::CLICK));
             if r.hovered() {
                 ui.painter().rect_filled(r.rect.expand(1.0), 3.0, RUST);
                 ui.painter().text(r.rect.left_top(), egui::Align2::LEFT_TOP, t, font.clone(), STAGE);
@@ -2555,7 +2698,7 @@ impl App {
                         ui.horizontal(|ui| {
                             for sw in SWATCHES {
                                 let sc = config::hex(sw).map_or(MUTED, rgb);
-                                let (r, resp) = ui.allocate_exact_size(Vec2::splat(g.rh * 0.9), Sense::click());
+                                let (r, resp) = ui.allocate_exact_size(Vec2::splat(g.rh * 0.9), Sense::CLICK);
                                 ui.painter().rect_filled(r, 3.0, sc);
                                 if resp.hovered() || sc == c {
                                     ui.painter().rect_stroke(r, 3.0, Stroke::new(1.5, TEXT), StrokeKind::Outside);
@@ -2636,7 +2779,7 @@ impl App {
         let pos = Pos2::new(full.center().x - size.x * 0.5, full.top() + g.rh * 3.0);
         let font = g.font.clone();
         let (name_ref, cid_ref) = (&mut f.name, &mut f.cid);
-        let o = dialog(ctx, g, "form", pos, title, &rows, 44, alpha, Act::Close, |ui, o| {
+        let o = dialog(ctx, g, "form", pos, title, &rows, 44, alpha, true, Act::Close, |ui, o| {
             let field = |row: usize, col: usize, w: usize| Rect::from_min_size(o + Vec2::new(col as f32 * g.cw, row as f32 * g.rh), g.size(w, 1));
             theme::field_bg(ui.painter(), field(0, 10, 20));
             theme::field_bg(ui.painter(), field(2, 10, 9));
@@ -2698,7 +2841,7 @@ impl App {
         );
         let size = theme::dialog_size(g, "Keys", &rows, 0);
         let pos = Pos2::new(full.center().x - size.x * 0.5, (full.center().y - size.y * 0.5).max(full.top() + g.rh * 2.0));
-        let o = dialog(ctx, g, "help", pos, "Keys", &rows, 0, alpha, Act::Close, |_, _| {});
+        let o = dialog(ctx, g, "help", pos, "Keys", &rows, 0, alpha, true, Act::Close, |_, _| {});
         self.chrome_hover |= o.hovered;
         o.click
     }
@@ -2717,11 +2860,19 @@ impl App {
             ]),
         ];
         let size = theme::dialog_size(g, "Unsaved edits", &rows, 0);
-        dialog(ctx, g, "unsaved", full.center() - size * 0.5, "Unsaved edits", &rows, 0, alpha, Act::Close, |_, _| {}).click
+        dialog(ctx, g, "unsaved", full.center() - size * 0.5, "Unsaved edits", &rows, 0, alpha, true, Act::Close, |_, _| {}).click
     }
 
-    fn crop_bar(&mut self, ctx: &egui::Context, g: &Grid, stage: Rect, alpha: f32) -> Option<Act> {
-        let c = self.crop.as_ref()?;
+    /// The crop tool's bar. It sits under the picture's middle, or over it
+    /// when the frame's bottom edge runs under the bar; and whenever the
+    /// pointer comes within reach of a frame edge or corner, or the frame is
+    /// being dragged, it fades and lets the pointer through, so no edge of
+    /// the picture is ever out of reach.
+    fn crop_bar(&mut self, ctx: &egui::Context, g: &Grid, stage: Rect) -> Option<Act> {
+        let Some(c) = self.crop.as_ref() else {
+            ctx.animate_bool_with_time(Id::new("crop-bar"), false, 0.14);
+            return None;
+        };
         let rows = vec![Row::new(vec![
             r("Ratio ", MUTED),
             ra("◄", RUST_HI, Act::Aspect(false)),
@@ -2733,8 +2884,55 @@ impl App {
             ra("[ Cancel ]", MUTED, Act::CropCancel),
         ])];
         let size = theme::dialog_size(g, "Crop", &rows, 0);
-        let pos = Pos2::new(stage.center().x - size.x * 0.5, stage.bottom() - size.y - g.rh * 2.5);
-        dialog(ctx, g, "cropbar", pos, "Crop", &rows, 0, alpha, Act::CropCancel, |_, _| {}).click
+        let below = Rect::from_min_size(Pos2::new(stage.center().x - size.x * 0.5, stage.bottom() - size.y - g.rh * 2.5), size);
+        let above = Rect::from_min_size(Pos2::new(below.left(), stage.top() + g.rh * 2.5), size);
+        let band = g.rh.max(16.0);
+        let frame = self.img_rect.map(|ir| Rect::from_min_max(ir.lerp_inside(Vec2::new(c.r[0], c.r[1])), ir.lerp_inside(Vec2::new(c.r[2], c.r[3]))));
+        let crosses = |bar: Rect, y: f32| y > bar.top() - band && y < bar.bottom() + band;
+        let at = match frame {
+            Some(f) if crosses(below, f.bottom()) && !crosses(above, f.top()) => above,
+            _ => below,
+        };
+        let near_edge = frame.is_some_and(|f| {
+            ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| f.expand(band).contains(p) && !f.shrink(band).contains(p))
+        });
+        let live = c.grab.is_none() && !near_edge;
+        let alpha = ctx.animate_bool_with_time(Id::new("crop-bar"), live, 0.12).max(0.12);
+        dialog(ctx, g, "cropbar", at.min, "Crop", &rows, 0, alpha, live, Act::CropCancel, |_, _| {}).click
+    }
+
+    /// Room the open overlays need, read from where they were drawn. A
+    /// centred window needs its width either side of the centre; a menu
+    /// hangs from its title and needs to reach its far edge; a popover
+    /// needs its distance from the centre, both ways.
+    fn overlay_need(&self, ctx: &egui::Context, g: &Grid, full: Rect) -> Vec2 {
+        let at = |id: &str| ctx.memory(|m| m.area_rect(Id::new(id)));
+        let mut need = Vec2::ZERO;
+        let centred = match self.dialog {
+            Dialog::Settings => Some("settings"),
+            Dialog::Form(_) => Some("form"),
+            Dialog::Help => Some("help"),
+            Dialog::Unsaved => Some("unsaved"),
+            Dialog::None => None,
+        };
+        for id in centred.into_iter().chain(self.crop.is_some().then_some("cropbar")) {
+            if let Some(r) = at(id) {
+                need = need.max(Vec2::new(r.width() + g.cw * 4.0, r.height() + g.rh * 6.0));
+            }
+        }
+        if self.menu.is_some()
+            && let Some(r) = at("dropdown")
+        {
+            need = need.max(Vec2::new(r.right() - full.left() + g.cw, r.bottom() - full.top() + g.rh));
+        }
+        let c = full.center().x;
+        for (on, id) in [(self.cid_edit.is_some(), "cid-edit"), (self.key_edit.is_some(), "key-edit")] {
+            if on && let Some(r) = at(id) {
+                let half = (r.right() - c).max(c - r.left());
+                need = need.max(Vec2::new(half * 2.0 + g.cw * 2.0, r.bottom() - full.top() + g.rh));
+            }
+        }
+        need
     }
 
     fn splash(&self, p: &egui::Painter, g: &Grid, rect: Rect) {
@@ -2775,7 +2973,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.font_on != Some(self.s.font) {
             fonts::install(&ctx, self.s.font);
@@ -2819,76 +3017,171 @@ impl eframe::App for App {
         let was_hover = self.chrome_hover;
         self.chrome_hover = false;
         let awake = !self.quiet || self.s.pin_ui;
-        let bar_on = self.s.pin_ui || dialog_open || self.menu.is_some() || (awake && (near_top || (was_hover && !near_bottom)));
-        let status_on = self.s.pin_ui || (awake && near_bottom);
+        // While a crop is on (Crop or DANGER), the floating interface yields
+        // to the picture: with the pointer on or at the picture, or a frame
+        // being dragged, the menu bar, status line, tool strip and fold tab
+        // neither come up nor take clicks, so every edge of the picture can
+        // be reached. A menu or window opened on purpose (Alt+F, `.`) still
+        // opens; pinned bars have their own room and stay.
+        let crop_on = self.crop.is_some() || self.danger;
+        let on_pic = ptr.is_some_and(|p| self.img_rect.is_some_and(|r| r.expand(g.rh).contains(p)));
+        let framing = self.quick.is_some() || self.crop.as_ref().is_some_and(|c| c.grab.is_some());
+        self.yielding = crop_on && (on_pic || framing);
+        let floating = awake && !self.yielding;
+        let bar_on = self.s.pin_ui || dialog_open || self.menu.is_some() || (floating && (near_top || (was_hover && !near_bottom)));
+        let status_on = self.s.pin_ui || (floating && near_bottom);
         let a_bar = ctx.animate_bool_with_time(Id::new("fade-bar"), bar_on, 0.16);
         let a_status = ctx.animate_bool_with_time(Id::new("fade-status"), status_on, 0.16);
 
         // Layout. Pinned chrome takes its own room; hovered chrome floats over
         // the image. The tree's width animates and the stage takes the rest,
-        // so folding the tree grows the image.
+        // so folding the tree grows the image. Folding the image gives the
+        // tree the window.
         let bar_h = g.rh * 1.5;
         let top = full.top() + if self.s.pin_ui { bar_h } else { 0.0 };
         let bottom = full.bottom() - if self.s.pin_ui { bar_h } else { 0.0 };
-        let open_w = if self.lib.is_some() { self.tree_width(&g, full) } else { 0.0 };
-        let target = if self.s.tree && self.lib.is_some() { open_w } else { 0.0 };
-        let pw = ctx.animate_value_with_time(Id::new("panel-w"), target, 0.22);
-        // The margin between tree and image opens and closes with the fold;
-        // its centre line is the divider.
+        let lib_on = self.lib.is_some();
+        let tree_on = self.s.tree && lib_on;
+        let img_on = self.s.image || !tree_on;
+        let dragging = ctx.is_being_dragged(Id::new("divider"));
+
+        // Image focus: the tree folded, the window becomes the picture's
+        // frame (see `focus`). It waits for a divider drag to end.
+        let focus_on = lib_on && !tree_on && img_on && !dragging;
+        let ctl_w = (bar_h * 1.6).round();
+        let want = focus::Want {
+            aspect: self.current_px().map(|[w, h]| w as f32 / h.max(1) as f32),
+            chrome: Vec2::new(0.0, if self.s.pin_ui { bar_h * 2.0 } else { 0.0 }),
+            need: self.need,
+            // The menu bar's least: the logo, File Edit View, the window buttons.
+            min: Vec2::new((g.cw * 24.0 + ctl_w * 3.0).max(320.0), 200.0),
+        };
+        let work = if focus_on || self.focus.active() { focus::work_area(frame, &ctx) } else { None };
+        self.focus.step(&ctx, focus_on, &want, work, now);
+        let focused = self.focus.active();
+
+        let open_w = if lib_on { self.tree_width(&g, full) } else { 0.0 };
+        let target = match (tree_on, img_on) {
+            (false, _) => 0.0,
+            (true, false) => full.width(),
+            (true, true) => open_w,
+        };
+        // In focus the window itself changes shape; the panel goes at once.
+        let pw = ctx.animate_value_with_time(Id::new("panel-w"), target, if focused { 0.0 } else { 0.22 });
+        // The margin between tree and image opens and closes with either
+        // fold; its centre line is the divider.
         let open_frac = if open_w > 0.0 { (pw / open_w).clamp(0.0, 1.0) } else { 0.0 };
-        let gutter = g.cw * 2.0 * open_frac;
-        let line_x = full.left() + pw + gutter * 0.5;
+        let img_frac = ((full.width() - pw) / (g.cw * 6.0)).clamp(0.0, 1.0);
+        let gutter = g.cw * 2.0 * open_frac * img_frac;
+        let line_x = (full.left() + pw + gutter * 0.5).min(full.right() - 2.0);
         let panel = Rect::from_min_max(Pos2::new(full.left(), top), Pos2::new(full.left() + pw, bottom));
-        let stage = Rect::from_min_max(Pos2::new(full.left() + pw + gutter, top), Pos2::new(full.right(), bottom));
+        let stage = Rect::from_min_max(Pos2::new((full.left() + pw + gutter).min(full.right()), top), Pos2::new(full.right(), bottom));
 
         let mut acts: Vec<Act> = Vec::new();
-        if self.lib.is_none() {
+        if !lib_on {
             self.splash(ui.painter(), &g, full);
         } else {
             if pw > 1.0 {
-                // Content rides the panel's right edge, so folding slides it away.
-                let x0 = panel.right() - open_w;
+                // Content rides the panel's right edge, so folding slides it
+                // away; given the whole window, it starts at the left.
+                let x0 = (panel.right() - open_w).min(panel.left());
                 self.tree_pane(ui, panel, x0, &g, now);
-                // The divider: drag it to set the tree's width, double-click it
-                // to go back to hugging the tree.
-                let zone = Rect::from_center_size(Pos2::new(line_x, panel.center().y), Vec2::new(g.cw * 1.4, panel.height()));
-                let dr = ui.interact(zone, Id::new("divider"), Sense::click_and_drag());
+            }
+            // The divider: drag it to set the tree's width, all the way left
+            // to fold the tree, all the way right to fold the image;
+            // double-click it to go back to hugging the tree.
+            let edge_l = full.left() + g.cw * 8.0;
+            let edge_r = full.right() - g.cw * 8.0;
+            let split = pw > 1.0 && full.width() - pw > 1.0;
+            let zone = if split || dragging {
+                Some(Rect::from_center_size(Pos2::new(line_x, panel.center().y), Vec2::new(g.cw * 1.4, panel.height())))
+            } else if !img_on {
+                // Image folded: grab the window's right edge to pull it back.
+                Some(Rect::from_min_max(Pos2::new(full.right() - 14.0, top), Pos2::new(full.right() - 4.0, bottom)))
+            } else {
+                None
+            };
+            if let Some(zone) = zone {
+                let dr = ui.interact(zone, Id::new("divider"), Sense::CLICK | Sense::DRAG);
                 let hot = dr.hovered() || dr.dragged();
                 let a_hot = ctx.animate_bool_with_time(Id::new("divider-hot"), hot, 0.12);
                 if hot {
                     ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
                 }
-                if dr.dragged() {
-                    self.s.panel_w = Some((open_w + dr.drag_delta().x).clamp(g.cw * 24.0, full.width() * 0.6));
+                if dr.dragged()
+                    && let Some(q) = dr.interact_pointer_pos()
+                {
+                    if q.x < edge_l {
+                        self.s.tree = false;
+                        self.s.image = true;
+                    } else if q.x > edge_r {
+                        self.s.image = false;
+                        self.s.tree = true;
+                    } else {
+                        self.s.tree = true;
+                        self.s.image = true;
+                        let max = (full.width() - g.cw * 24.0).max(g.cw * 24.0);
+                        self.s.panel_w = Some((q.x - full.left() - g.cw).clamp(g.cw * 24.0, max));
+                    }
                 }
                 if dr.double_clicked() {
                     self.s.panel_w = None;
                     self.tree_hold = 0.0;
                 }
-                let col = lerp_color(EDGE.gamma_multiply(0.7), RUST_HI, a_hot).gamma_multiply(open_frac);
+                let fade = if split || dragging { open_frac.max(0.35) } else { a_hot };
+                let col = lerp_color(EDGE.gamma_multiply(0.7), RUST_HI, a_hot).gamma_multiply(fade);
                 let p = ui.painter();
                 let y0 = top + g.rh * 0.75;
                 let y1 = bottom - g.rh * 0.75;
-                p.line_segment([Pos2::new(line_x.round() + 0.5, y0), Pos2::new(line_x.round() + 0.5, y1)], Stroke::new(1.0 + a_hot, col));
+                let lx = line_x.round() + 0.5;
+                p.line_segment([Pos2::new(lx, y0), Pos2::new(lx, y1)], Stroke::new(1.0 + a_hot, col));
                 if a_hot > 0.01 {
                     // Grip: three dots where the pointer meets the rule.
-                    let gy = dr.hover_pos().map_or(panel.center().y, |h| h.y).clamp(y0 + 12.0, y1 - 12.0);
+                    let gy = dr.hover_pos().or(dr.interact_pointer_pos()).map_or(panel.center().y, |h| h.y).clamp(y0 + 12.0, y1 - 12.0);
                     for d in [-7.0, 0.0, 7.0] {
                         p.circle_filled(Pos2::new(line_x, gy + d), 2.0, RUST_HI.gamma_multiply(a_hot));
                     }
                 }
+                // Past either edge: the side that will fold dims, so the
+                // drag says what letting go will do.
+                if dragging && let Some(q) = ctx.input(|i| i.pointer.interact_pos()) {
+                    let fold = if q.x < edge_l {
+                        Some(Rect::from_min_max(full.min, Pos2::new(full.left() + g.cw * 3.0, full.bottom())))
+                    } else if q.x > edge_r {
+                        Some(Rect::from_min_max(Pos2::new(full.right() - g.cw * 3.0, full.top()), full.max))
+                    } else {
+                        None
+                    };
+                    if let Some(f) = fold {
+                        p.rect_filled(f, 0.0, RUST.gamma_multiply(0.18));
+                    }
+                }
             }
-            self.stage(ui, stage.shrink(g.rh * 0.6), &g, now);
+            if img_on && stage.width() > g.cw * 4.0 {
+                // In focus the picture meets the window's edges.
+                let pad = if focused { 0.0 } else { g.rh * 0.6 };
+                self.stage(ui, stage.shrink(pad), &g, now, focused);
+            } else {
+                self.img_rect = None;
+            }
         }
 
-        // Fold tab: appears as the pointer nears the tree's edge.
-        if self.lib.is_some() {
-            let edge_x = line_x;
-            let near_edge = ptr.is_some_and(|p| (p.x - edge_x).abs() < g.cw * 6.0 && p.y > top && p.y < bottom);
+        // Fold tab: at the top of the divider, under the menu bar's band. It
+        // arrives with the menu bar, or when the pointer comes near it.
+        if lib_on {
+            let size = Vec2::new(g.cw * 1.8, g.rh * 2.0);
+            let ty = full.top() + bar_h + g.rh * 0.5;
+            let (x, glyph, act) = match (tree_on, img_on) {
+                (false, _) => (full.left() + 8.0, ">", Act::Tree),
+                (true, false) => (full.right() - size.x - 8.0, "<", Act::Image),
+                (true, true) => (line_x - size.x * 0.5, "<", Act::Tree),
+            };
+            let tab = Rect::from_min_size(Pos2::new(x.max(full.left() + 6.0), ty), size);
+            let near = ptr.is_some_and(|p| tab.expand2(Vec2::new(g.cw * 4.0, g.rh * 2.5)).contains(p) || (tree_on && img_on && (p.x - line_x).abs() < g.cw * 2.0));
             // Never over an open window or menu.
-            let tab_on = !dialog_open && self.menu.is_none() && (self.s.pin_ui || (awake && near_edge));
+            let tab_on = !dialog_open && self.menu.is_none() && !dragging && !self.yielding && (self.s.pin_ui || bar_on || (awake && near));
             let a_tab = ctx.animate_bool_with_time(Id::new("fade-tab"), tab_on, 0.16);
-            if let Some(a) = self.fold_tab(&ctx, &g, edge_x, (top + bottom) * 0.5, a_tab) {
+            if let Some(a) = self.fold_tab(&ctx, &g, tab, glyph, act, a_tab) {
                 acts.push(a);
             }
         }
@@ -2911,9 +3204,12 @@ impl eframe::App for App {
         if just_on {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        let tb_on = self.s.toolbar && self.lib.is_some() && (self.s.pin_ui || bar_on || engaged || just_on || self.tools_hover || (awake && near_tools));
+        let tb_on = self.s.toolbar
+            && self.lib.is_some()
+            && !self.yielding
+            && (self.s.pin_ui || bar_on || engaged || just_on || self.tools_hover || (awake && near_tools));
         let a_tb = ctx.animate_bool_with_time(Id::new("fade-tools"), tb_on, 0.16);
-        let tb = toolbar::show(&ctx, &g, anchor, room, &tools, a_tb, now);
+        let tb = toolbar::show(&ctx, &g, anchor, room, &tools, a_tb, !self.yielding, now);
         self.tools_hover = tb.hovered;
         if tb.rect.is_positive() {
             self.toolbar_rect = Some(tb.rect);
@@ -2972,7 +3268,7 @@ impl eframe::App for App {
                 {
                     ty = ty.max(r.bottom() + g.rh * 0.6);
                 }
-                let pos = Pos2::new(full.right() - (w as f32 + 2.0) * g.cw, ty);
+                let pos = Pos2::new((full.right() - (w as f32 + 2.0) * g.cw).max(full.left() + g.cw), ty);
                 let box_r = Rect::from_min_size(pos, g.size(w, 1)).expand2(Vec2::new(0.0, g.rh * 0.4));
                 tp.rect_filled(box_r.translate(Vec2::new(3.0, 4.0)), 2.0, SHADOW.gamma_multiply(a));
                 tp.rect_filled(box_r, 2.0, IRON.gamma_multiply(a));
@@ -2984,8 +3280,7 @@ impl eframe::App for App {
             }
         }
 
-        let a_crop = ctx.animate_bool_with_time(Id::new("crop-bar"), self.crop.is_some(), 0.14);
-        if let Some(a) = self.crop_bar(&ctx, &g, stage, a_crop) {
+        if let Some(a) = self.crop_bar(&ctx, &g, stage) {
             acts.push(a);
         }
         if let Some(a) = self.menubar(&ctx, &g, full, a_bar) {
@@ -3022,8 +3317,14 @@ impl eframe::App for App {
         if self.key_edit.is_some() {
             self.key_editor(&ctx, &g, now);
         }
-        // No system frame: the edges resize, a hairline marks them.
-        window::edges(&ctx, full);
+        // What the open windows and menus need, for image focus next frame.
+        self.need = self.overlay_need(&ctx, &g, full);
+        // No system frame: the edges resize, a hairline marks them. Not
+        // while cropping: in focus the picture's edges are the window's, and
+        // a press there belongs to the crop.
+        if !crop_on {
+            window::edges(&ctx, full);
+        }
         window::hairline(&ctx, full);
         // A click anywhere else closes an open menu.
         if self.menu.is_some() && ctx.input(|i| i.pointer.primary_clicked()) && !self.chrome_hover && acts.is_empty() {
@@ -3046,6 +3347,21 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.s.focus_budget = Some([self.focus.budget.x, self.focus.budget.y]);
+        self.s.home = self.focus.home.map(|(h, m)| ([h.x, h.y], m));
         eframe::set_value(storage, "rusted-calamari", &self.s);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plain;
+    use std::path::PathBuf;
+
+    #[test]
+    fn verbatim_prefixes_come_off() {
+        assert_eq!(plain(PathBuf::from(r"\\?\C:\Users\ryanf\Desktop\ruth-image")), PathBuf::from(r"C:\Users\ryanf\Desktop\ruth-image"));
+        assert_eq!(plain(PathBuf::from(r"\\?\UNC\nas\photos")), PathBuf::from(r"\\nas\photos"));
+        assert_eq!(plain(PathBuf::from("/home/me/photos")), PathBuf::from("/home/me/photos"));
     }
 }

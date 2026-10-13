@@ -3211,8 +3211,10 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "image",
+ "raw-window-handle",
  "rfd",
  "serde",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

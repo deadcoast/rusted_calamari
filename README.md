@@ -55,7 +55,7 @@ To update, run `cargo install --path .` again from the repo. To remove it, run
 ## Requirements
 
 | | |
-| --- | --- |
+|---|---|
 | Rust | 1.95 or newer (egui 0.36 needs it). Check with `rustc --version`. |
 | Windows | The MSVC C++ build tools. The rustup installer offers them; otherwise install Visual Studio Build Tools with "Desktop development with C++". |
 | macOS | The Xcode command line tools: `xcode-select --install`. |
@@ -74,9 +74,11 @@ To update, run `cargo install --path .` again from the repo. To remove it, run
    use). The image drops toward its key on the status line and the next one
    comes up. `Ctrl+Z` undoes the move.
 4. **Find the controls.** Move the pointer to the top edge for the menu bar,
-   or to the bottom edge for the status line. Move it near the tree's edge
-   for the fold tab. `H` lists every key, `.` opens Settings, and `Tab` folds
-   the tree away so the image gets the whole window.
+   with the fold tab just under it, or to the bottom edge for the status
+   line. `H` lists every key and `.` opens Settings.
+5. **Focus on the pictures.** `Tab` folds the tree away, and the window
+   closes round the image (see [Image focus](#image-focus)). `Tab` again
+   brings the tree back.
 
 To keep the bars on screen, turn on **PIN_UI** in Settings or choose View →
 Pin the interface.
@@ -84,7 +86,7 @@ Pin the interface.
 ## Keys
 
 | Key | Does |
-| --- | --- |
+|---|---|
 | `←` `→` · `↑` `↓` · `[` `]` · `;` `'` | Back/on 1 · 5 · 25 · 50 |
 | `z` `x` `c` `v` `Space` | Move the image into a category (rebind in Settings) |
 | `Ctrl+Z` / `Backspace` · `Ctrl+Shift+Z` / `Ctrl+Y` | Undo · redo (moves, trash, saves, crops, edits) |
@@ -93,24 +95,53 @@ Pin the interface.
 | `Ctrl+R` · `Ctrl+F` | Rotate right · flip horizontal (add `Shift`: rotate left · flip vertical) |
 | `Ctrl+S` · `Ctrl+Shift+S` | Save edits into the file · export as a new file |
 | `Del` | Move to `<library>/.calamari_trash/` |
-| `Tab` · `0` · `Ctrl+1` · `F11` | Fold the tree · fit · actual size · full screen |
+| `Tab` · `Shift+Tab` | Fold the tree (image focus) · fold the image (tree only) |
+| `F11` | Full screen; in image focus, step Fit → Large → Full |
+| `0` · `Ctrl+1` | Fit · actual size |
 | Mouse wheel · drag · double-click | Zoom · pan · fit |
 | `Ctrl+O` · `Ctrl+I` | Open a folder · import images into the current folder |
-| `H` · `.` · `Esc` · `Alt+F/E/V` | Keys · Settings · close · open a menu |
+| `H` · `.` · `Esc` · `Alt+F/E/V` | Keys · Settings · close (or leave full screen) · open a menu |
 
 In the tree: click a folder to browse it (click it again to fold it). Click a
 category slot to move the image there. Right-click a slot to browse what's
 in it.
 
+Drag the divider to set the tree's width. Drag it all the way left to fold
+the tree, or all the way right to fold the image; the edge that will fold
+tints while you're past it.
+
 The window has no system title bar. Drag the top bar's empty space to move
 the window, double-click it to maximize, and drag any edge or corner to
 resize. Minimize, maximize and close sit at the right end of the top bar.
+
+## Image focus
+
+Fold the tree (`Tab`, the `<` tab, or drag the divider all the way left)
+and the window becomes the picture's frame. It closes round the image edge
+to edge, with no bars: a portrait picture gets a portrait window. As you
+browse, it takes each image's shape and keeps its centre. The menu bar,
+status line and toolbar still come up on hover, over the picture.
+
+The maximize button (or `F11`, or a double-click on the top bar) steps
+through three sizes:
+
+| Size | The window |
+|---|---|
+| **Fit** | Wraps the picture at the size the window had when you folded the tree |
+| **Large** | Wraps it as large as the screen allows, taskbar excluded |
+| **Full** | Full screen, picture centred, bars only where its shape differs from the screen's |
+
+One more press (or `Esc` in full screen) goes back to Fit. Resizing the
+window by hand sets a new size for Fit; it settles round the picture as
+soon as you let go. Help, Settings and other windows that need more room
+than a narrow picture gives grow the window while they're open. Unfolding
+the tree gives the window back its earlier size.
 
 ## Categories
 
 Categories live in `<library>/.calamari`, one per line:
 
-```ps1
+```
 # key  name     cid      tier
 spc    _float_  #E6D463  a
 -      _fav_    #F0A35E  b
@@ -138,6 +169,12 @@ Crop, rotate and flip stay pending until you save (`Ctrl+S`) or export
 (`Ctrl+Shift+S`), so they can be undone step by step before anything
 touches the file.
 
+While either crop tool is on, the menu bar, status line, toolbar and fold
+tab stay out of the way whenever the pointer is on the picture, so every
+edge can be grabbed, even in image focus. The picture is never shrunk to
+make room. The crop bar moves off the frame's edge and lets the pointer
+through when you reach for an edge under it.
+
 **DANGER crop** is for speed. Turn it on (`Ctrl+Shift+K`, or the toolbar
 from View → Show the toolbar), then hold the mouse button on the image,
 drag a box and let go. The file is cropped and written immediately, with no
@@ -148,7 +185,7 @@ which would lose their frames.
 ## Where things live
 
 | What | Where |
-| --- | --- |
+|---|---|
 | Settings and last library | Windows `%APPDATA%\Rusted Calamari\data\app.ron` · macOS `~/Library/Application Support/Rusted-Calamari/` · Linux `~/.local/share/rustedcalamari/app.ron` |
 | Category table | `<library>/.calamari` |
 | Trash | `<library>/.calamari_trash/` |
@@ -179,12 +216,14 @@ cargo test --release
 ```
 
 The tests cover the tree layout and click engine, file operations
-(move/undo, rotate/restore, export) and the toolbar layout.
+(move/undo, rotate/restore, export), image focus sizing and the toolbar
+layout.
 
-```txt
+```
 src/
   main.rs       window setup (borderless)
   app.rs        the viewer: stage, tree pane, menus, dialogs, keys, undo/redo
+  focus.rs      image focus: the window shaped round the picture
   theme.rs      shared frames, menus, dialogs
   toolbar.rs    the tool strip: registry, layout, animated buttons
   window.rs     title-bar jobs: drag, resize bands, window buttons

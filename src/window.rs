@@ -46,7 +46,7 @@ pub fn edges(ctx: &egui::Context, full: Rect) {
     ];
     for (i, (zone, dir, cursor)) in zones.into_iter().enumerate() {
         Area::new(Id::new("resize").with(i)).fixed_pos(zone.min).order(Order::Tooltip).show(ctx, |ui| {
-            let (_, resp) = ui.allocate_exact_size(zone.size(), Sense::drag());
+            let (_, resp) = ui.allocate_exact_size(zone.size(), Sense::DRAG);
             if resp.hovered() || resp.dragged() {
                 ctx.set_cursor_icon(cursor);
             }
@@ -67,22 +67,23 @@ pub fn hairline(ctx: &egui::Context, full: Rect) {
     p.rect_stroke(full, 0.0, Stroke::new(1.0, EDGE.gamma_multiply(0.55)), StrokeKind::Inside);
 }
 
-/// The three window buttons, right-aligned in `bar`, each `w` wide.
-/// Returns the one clicked and the span they cover.
-pub fn controls(ui: &egui::Ui, bar: Rect, w: f32, alpha: f32) -> (Option<Ctl>, Rect) {
+/// The glyph for the maximize button outside image focus.
+pub fn max_glyph(ctx: &egui::Context) -> &'static str {
+    let (maxed, fs) = state(ctx);
+    if maxed || fs { ph::COPY } else { ph::SQUARE }
+}
+
+/// The three window buttons, right-aligned in `bar`, each `w` wide; the
+/// middle one shows `max`. Returns the one clicked and the span they cover.
+pub fn controls(ui: &egui::Ui, bar: Rect, w: f32, alpha: f32, max: &'static str) -> (Option<Ctl>, Rect) {
     let ctx = ui.ctx().clone();
-    let (maxed, fs) = state(&ctx);
-    let items = [
-        (Ctl::Minimize, ph::MINUS),
-        (Ctl::Maximize, if maxed || fs { ph::COPY } else { ph::SQUARE }),
-        (Ctl::Close, ph::X),
-    ];
+    let items = [(Ctl::Minimize, ph::MINUS), (Ctl::Maximize, max), (Ctl::Close, ph::X)];
     let span = Rect::from_min_max(Pos2::new(bar.right() - w * items.len() as f32, bar.top()), bar.max);
     let mut hit = None;
     for (i, (ctl, glyph)) in items.into_iter().enumerate() {
         let r = Rect::from_min_size(Pos2::new(span.left() + w * i as f32, bar.top()), Vec2::new(w, bar.height()));
         // Click and drag: a press that wanders must not start a window drag.
-        let resp = ui.interact(r, Id::new("winctl").with(i), Sense::click_and_drag());
+        let resp = ui.interact(r, Id::new("winctl").with(i), Sense::CLICK | Sense::DRAG);
         let h = ctx.animate_bool_with_time(resp.id.with("h"), resp.hovered(), 0.1);
         let d = ctx.animate_bool_with_time(resp.id.with("d"), resp.is_pointer_button_down_on(), 0.05);
         let p = ui.painter();

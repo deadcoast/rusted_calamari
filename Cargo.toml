@@ -19,5 +19,10 @@ rfd = "0.17"
 egui-phosphor = { version = "0.14", default-features = false, features = ["bold", "fill"] }
 serde = { version = "1", features = ["derive"] }
 
+# The screen's work area (minus the taskbar), for image focus.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
+
 [profile.release]
 opt-level = 3
