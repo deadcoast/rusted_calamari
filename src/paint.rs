@@ -18,6 +18,8 @@ pub const TEXT: Rgb = (0xd7, 0xda, 0xe0);
 pub const MUTED: Rgb = (0x7a, 0x82, 0x90);
 pub const GOLD: Rgb = (0xe6, 0xd4, 0x63);
 pub const RUST_HI: Rgb = (0xe3, 0x88, 0x4a);
+/// Cool steel distinguishes folder navigation from orange category slots.
+pub const STEEL: Rgb = (0xa9, 0xbc, 0xd0);
 
 pub fn fg(c: Rgb, bold: bool) -> String {
     format!("\x1b[{}38;2;{};{};{}m", if bold { "1;" } else { "" }, c.0, c.1, c.2)
@@ -27,6 +29,7 @@ pub const RESET: &str = "\x1b[0m";
 pub fn colour(t: &Tree, cls: Cls) -> (Rgb, bool) {
     match cls {
         Cls::Trunk(d) | Cls::Border(d) => (DEPTH[d % DEPTH.len()], false),
+        Cls::BeakTrunk(d) => (DEPTH[d % DEPTH.len()], true),
         Cls::Tier => (MUTED, false),
         Cls::Brack => ((0x5c, 0x63, 0x70), false),
         Cls::Name => (TEXT, false),
@@ -38,9 +41,8 @@ pub fn colour(t: &Tree, cls: Cls) -> (Rgb, bool) {
         Cls::Count => (MUTED, false),
         Cls::Fold => ((0xc4, 0x9a, 0x5f), false),
         Cls::Ink => ((0x8a, 0x7f, 0xd0), false),
-        Cls::Mantle => (RUST_HI, true),
-        Cls::Active => (RUST_HI, true),
-        Cls::Cursor => ((0xb2, 0x52, 0x2a), false),
+        Cls::Mantle | Cls::Active => (STEEL, true),
+        Cls::Cursor => (MUTED, false),
         Cls::Plain => (TEXT, false),
     }
 }

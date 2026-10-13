@@ -45,8 +45,8 @@ fn categories_form_one_beak_row_per_tier() {
     let t = tree("beak");
     let f = render(&t, Style::Arm, &Ctx::default());
     let text: Vec<String> = f.lines.iter().map(|l| l.text()).collect();
-    assert!(text.iter().any(|l| l.contains("a.[_float_:2]")), "{text:#?}");
-    assert!(text.iter().any(|l| l.contains("c.[1:4, 2:1]")), "{text:#?}");
+    assert!(text.iter().any(|l| l.contains("[_float_:2]")), "{text:#?}");
+    assert!(text.iter().any(|l| l.contains("[1:4, 2:1]")), "{text:#?}");
     // Categories are not arms.
     assert!(!text.iter().any(|l| l.contains("[1]")));
 }
@@ -167,7 +167,7 @@ fn narrow_width_reflows_beak_onto_the_spine() {
     assert!(lv >= 3, "level {lv}");
     assert!(f.width() < wide.width());
     let text: Vec<String> = f.lines.iter().map(|l| l.text()).collect();
-    assert!(text.iter().any(|l| l.contains("╞═ a.[") || l.contains("╘═ a.[")), "{text:#?}");
+    assert!(text.iter().any(|l| l.contains("├─ [_float_:2]") || l.contains("└─ [_float_:2]")), "{text:#?}");
     // Rows still resolve to their nodes.
     assert!(f.row(a).is_some());
 }
@@ -185,5 +185,5 @@ fn tide_pins_the_clicked_row_in_the_reflowed_shape() {
     let f = render(&t, Style::Arm, &cx);
     assert!(t.nodes[x].open);
     assert_eq!(f.row(x).unwrap() - v.scroll, before, "the row under the pointer stays put");
-    assert!(f.lines.iter().any(|l| l.text().contains("╞═") || l.text().contains("╘═")), "drawn stacked at this width");
+    assert!(f.lines.iter().flat_map(|l| &l.spans).any(|s| matches!(s.cls, octo::layout::Cls::BeakTrunk(_))), "drawn stacked at this width");
 }

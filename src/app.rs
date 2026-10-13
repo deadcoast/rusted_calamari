@@ -1156,6 +1156,7 @@ impl App {
             }
             if let Some((k, t0)) = self.pressed
                 && k == line.key
+                && !line.heads.contains(&0)
                 && now - t0 < 0.4
             {
                 pv.rect_filled(row, 0.0, RUST.gamma_multiply(0.35 * (1.0 - ((now - t0) / 0.4) as f32)));
@@ -1211,6 +1212,11 @@ impl App {
                     u.1 = x + w;
                 }
                 runs.push((s.text.clone(), col));
+                if matches!(s.cls, Cls::BeakTrunk(_)) {
+                    // Thicken the single horizontal rule by one physical
+                    // pixel without changing the CP437 cell or hit width.
+                    g.text(&pv, Pos2::new(x, y + 1.0 / ctx.pixels_per_point()), &s.text, col, d.a);
+                }
                 x += w;
             }
             g.line(&pv, Pos2::new(inner.left(), y), &runs, d.a);

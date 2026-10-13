@@ -167,7 +167,7 @@ fn run() -> Result<(), String> {
         .map(|c| {
             format!(
                 "{}{}",
-                o.c(c.cid, true, &format!("{}.{}", c.tier, c.name)),
+                o.c(c.cid, true, &c.name),
                 o.c(MUTED, false, &c.key.as_ref().map(|k| format!("«{k}»")).unwrap_or_default())
             )
         })

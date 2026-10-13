@@ -15,9 +15,9 @@ design addition and is marked **[new]** where it first appears.
 ## 1. Anatomy
 
 ```txt
-                                   ┌─ a.[_float_:6]                  ← beak, tier a
-◙ [photos] ·············· 14 Σ259 ─┼─ b.[_fav_:3]                     ← beak, tier b
-│                                  └─ c.[1:9, 2:4, 3:7, 4:2]          ← beak, tier c
+                                   ┌─ [_float_:6]                  ← beak, tier a
+○ [photos] ·············· 14 Σ259 ─┼─ [_fav_:3]                     ← beak, tier b
+│                                  └─ [1:9, 2:4, 3:7, 4:2]          ← beak, tier c
 ├─ [scans] ►12                                                        ← folded arm
 ├─ [screens] ························ 31                              ← arm + suckers
 └─ [trips]
@@ -25,22 +25,23 @@ design addition and is marked **[new]** where it first appears.
    │  │  ┌─ [tokyo] ········ 8                                        ← mirrored arms
    │  │  ├─ [osaka] ························ 40
    │  │  ├─ [kyoto] ····· 5
-   │  └─ [japan] ··········· 11 ─┬─ a.[_float_:2]                     ← beak hangs down
-   │                             └─ c.[1:5, 2:3, 3:1]
+   │  └─ [japan] ··········· 11 ─┬─ [_float_:2]                     ← beak hangs down
+   │                             └─ [1:5, 2:3, 3:1]
    └─ [2025] ►1
 ```
 
 | Part | What it is |
 | --- | --- |
-| **Mantle** `◙` **[new]** | The root of the open library. Carries its loose files and `Σ` total. Its arms split above and below it so the body sits mid-screen. |
+| **Mantle** `○` **[new]** | The root of the open library. A plain circle with no filled box. Carries its loose files and `Σ` total. Its arms split above and below it so the body sits mid-screen. |
 | **Arm** | A plain subdirectory, hung on a spine. |
-| **Beak** | The category directories of a node (`_float_`, `_fav_`, `1`..`8`), collapsed into **one row per hier tier**: `c.[1:9, 2:4, 3:7]`. This is the request's `[img]->[cata]->[hier]` fan made literal: the beak is the set of slots the image in view can be filed into. Categories never appear as arms. |
+| **Beak** | The category directories of a node (`_float_`, `_fav_`, `1`..`8`), collapsed into **one row per hier tier**: `[1:9, 2:4, 3:7]`. This is the request's `[img]->[cata]->[hier]` fan made literal: the beak is the set of slots the image in view can be filed into. Categories never appear as arms. |
 | **Suckers** **[new]** | One cell per media file on the arm's own row. `·` = loose (in no category), `■` in the category's cid = filed. Over 10 files the row becomes a proportional 10-cell bar (shorter when the tree reflows, see 4b). A directory's sucker row shows at a glance how much of it is filed. |
 | **Ink** **[new]** | `~[ink +5] 1/2 ►`. A node shows at most eight things: the beak counts as one, arms fill the rest, overflow pages through the ink row. Clicking ink turns the page. |
 | **Fold mark** | `►12` on a closed node: how many children it holds. |
 
 Hier tiers are adjacent, never nested: `a`, `b`, `c` are rows of the same
-beak, ordered top to bottom.
+beak, ordered top to bottom. Tier letters stay in Settings and configuration;
+only the category names and counts appear in the tree.
 
 ## 2. Tokens and colour
 
@@ -51,9 +52,12 @@ OTF is coloured like source code. Each glyph run is a typed token:
 | `Trunk(depth)` | Spine and connector glyphs cycle a 6-colour ramp by depth, the way rainbow-bracket highlighting colours nesting. The octopus's arms read by colour before you read a name. |
 | `CatName(cat)` | The category's cid, bold. |
 | `Sucker(cat)` | The category's cid; loose files dim. |
-| `Tier`, `Brack`, `Count` | Muted, like punctuation. |
+| `Brack`, `Count` | Muted, like punctuation; brackets keep this colour beside an active folder name. |
 | `Name` | Primary text. |
-| `Mantle`, `Ink`, `Fold` | Fixed accents. |
+| `BeakTrunk(depth)` | The spine colour, with bold single rules for stacked categories. |
+| `Mantle`, `Active` | Cool steel blue (`#A9BCD0`), distinct from orange `_fav_` slots. |
+| `Cursor` | Muted position indicator. |
+| `Ink`, `Fold` | Fixed accents. |
 
 The renderer emits `Line { spans: [Span { cls, text, node }], tags, heads }`.
 The window paints spans on a monospace glyph grid in whichever of the
@@ -113,18 +117,18 @@ and takes the first shape that fits:
 | --- | --- |
 | 0 | Full detail. |
 | 1, 2 | Sucker bars shorten to 6, then 3 cells. |
-| 3 | The beak stops fanning right and hangs under its label, on the spine, with double rules (`╞═`, last `╘═`). Every style converges on this one spine. |
+| 3 | The beak stops fanning right and hangs under its label, on the spine, with bold single rules (`├─`, last `└─`). Every style converges on this one spine. |
 | 4 | Sucker bars go; the file count stays. |
-| 5–7 | Folder names are cut to 16, 10, then 6 columns (`[japa..]`); slot lists tighten (`c.[1:4,2,3:2]`, empty slots drop `:0`). |
+| 5–7 | Folder names are cut to 16, 10, then 6 columns (`[japa..]`); slot lists tighten (`[1:4,2,3:2]`, empty slots drop `:0`). |
 
 ```txt
-◙ [photos] 3 Σ55
-╞═ a.[_float_:2]
-╘═ c.[1:4,2:1]
+○ [photos] 3 Σ55
+├─ [_float_:2]
+├─ [1:4,2:1]
 └─ [trips]
    ├─ [japan_lo..]
-   │  ╞═ a.[_float_:1]
-   │  ╘═ c.[1,2,3:2,4]
+   │  ├─ [_float_:1]
+   │  └─ [1,2,3:2,4]
    └─ [osaka] 30
 ```
 
@@ -144,9 +148,9 @@ reshapes around it.
 Under the pointer: a folder underlines its `[name]` and lights its whole
 subtree with a band in its spine colour and a bar down the left, which
 glides from folder to folder; a slot becomes a keycap in its category's
-colour; an ink row lights up. A click pulses its row. When the open folder
-changes without a tree click (undo, browsing a slot), the tree scrolls it
-into view.
+colour; an ink row lights up. A click pulses its row, except the root, which
+has no click highlight. When the open folder changes without a tree click
+(undo, browsing a slot), the tree scrolls it into view.
 
 ## 5. Styles
 
@@ -157,7 +161,7 @@ into view.
 | `Boxtobrachial` | tier rows in a box hooked by `──┤` | spine |
 
 ```txt
-◙ [photos] ·· 14 Σ259 ──┤ b.[_fav_:3]            │
+○ [photos] ·· 14 Σ259 ──┤ [_fav_:3]            │
 ```
 
 ## 6. Inside Rusted Calamari

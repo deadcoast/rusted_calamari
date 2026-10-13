@@ -4,7 +4,7 @@
 //! on, the anchor). A directory has two kinds of children:
 //!
 //! * the **beak** — its category directories, one row per hier tier
-//!   (`a.[_float_:6]`, `c.[1:9, 2:4, 3:7]`), fanned off the label row.
+//!   (`[_float_:6]`, `[1:9, 2:4, 3:7]`), fanned off the label row.
 //!   The beak is the sorting mouth: the targets the active image can go to.
 //! * **arms** — every other subdirectory, hung on a spine above (mirrored)
 //!   or below the label.
@@ -14,8 +14,8 @@
 //!
 //! The tree reflows to the width it is given (`fit`): sucker bars shorten,
 //! then the beak stops fanning right and hangs under its label on the
-//! spine (`╞═`), then the bars go, then long names are cut and slot lists
-//! tighten (`c.[1:4,2,3:2]`). Every line carries a stable `Key` so a viewer
+//! spine (bold `├─`), then the bars go, then long names are cut and slot lists
+//! tighten (`[1:4,2,3:2]`). Every line carries a stable `Key` so a viewer
 //! can animate rows between renders.
 
 use crate::tree::{FileEntry, Fold, Side, Tree};
@@ -93,6 +93,8 @@ impl Style {
 pub enum Cls {
     /// Spine/connector glyphs; depth drives a rainbow-bracket cycle.
     Trunk(usize),
+    /// Stacked category connector: a bold single rule in the spine colour.
+    BeakTrunk(usize),
     Border(usize),
     Tier,
     Brack,
@@ -186,7 +188,7 @@ impl Block {
 struct Arm {
     b: Block,
     side: Side,
-    /// A beak tier hung on the spine (stacked reflow): drawn with `╞═`.
+    /// A beak tier hung on the spine (stacked reflow): drawn with bold `├─`.
     beak: bool,
 }
 
@@ -213,7 +215,7 @@ fn beak_rows(t: &Tree, id: usize, active: bool, ctx: &Ctx) -> Vec<Line> {
                 r.spans.push(sp(Cls::Brack, "]"));
             }
             rows.push(Line {
-                spans: vec![sp(Cls::Tier, format!("{tier}.")), sp(Cls::Brack, "[")],
+                spans: vec![sp(Cls::Brack, "[")],
                 tags: vec![],
                 heads: vec![],
                 kind: Kind::Beak,
@@ -313,12 +315,12 @@ fn label(t: &Tree, id: usize, ctx: &Ctx) -> Line {
     let n = &t.nodes[id];
     let mut s = Vec::new();
     if n.parent.is_none() {
-        s.push(sp(Cls::Mantle, "◙ "));
+        s.push(sp(Cls::Mantle, "○ "));
     }
     let on = ctx.active == Some(id);
-    s.push(sp(if on { Cls::Active } else { Cls::Brack }, "["));
+    s.push(sp(Cls::Brack, "["));
     s.push(sp(if on { Cls::Active } else { Cls::Name }, cut(&n.name, ctx.names)));
-    s.push(sp(if on { Cls::Active } else { Cls::Brack }, "]"));
+    s.push(sp(Cls::Brack, "]"));
     if on && !n.files.is_empty() {
         s.push(sp(Cls::Cursor, format!(" {}/{}", ctx.cursor + 1, n.files.len())));
     }
@@ -491,18 +493,14 @@ fn trunk(head: Block, kids: Vec<Arm>, depth: usize) -> Block {
         let a = k.b.anchor;
         for (r, l) in k.b.lines.into_iter().enumerate() {
             let pre = if r == a {
-                match (k.beak, last) {
-                    (true, true) => "╘═ ",
-                    (true, false) => "╞═ ",
-                    (false, true) => "└─ ",
-                    (false, false) => "├─ ",
-                }
+                if last { "└─ " } else { "├─ " }
             } else if r > a && last {
                 "   "
             } else {
                 "│  "
             };
-            out.push(l.front(vec![sp(c, pre)]));
+            let cls = if r == a && k.beak { Cls::BeakTrunk(depth) } else { c };
+            out.push(l.front(vec![sp(cls, pre)]));
         }
     }
     Block { lines: out, anchor }
