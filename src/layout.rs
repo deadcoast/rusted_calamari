@@ -165,7 +165,11 @@ impl Line {
 }
 
 fn sp(cls: Cls, text: impl Into<String>) -> Span {
-    Span { cls, text: text.into(), node: None }
+    Span {
+        cls,
+        text: text.into(),
+        node: None,
+    }
 }
 
 fn own(mut s: Span, node: Option<usize>) -> Span {
@@ -181,7 +185,10 @@ pub struct Block {
 
 impl Block {
     fn one(l: Line) -> Block {
-        Block { lines: vec![l], anchor: 0 }
+        Block {
+            lines: vec![l],
+            anchor: 0,
+        }
     }
 }
 
@@ -193,16 +200,35 @@ struct Arm {
 }
 
 fn arm(b: Block, side: Side) -> Arm {
-    Arm { b, side, beak: false }
+    Arm {
+        b,
+        side,
+        beak: false,
+    }
 }
 
 /// Category children grouped into one beak row per tier. The active
 /// folder shows every category as a slot, including ones not yet created.
 fn beak_rows(t: &Tree, id: usize, active: bool, ctx: &Ctx) -> Vec<Line> {
     let mut slots: Vec<(usize, Option<usize>)> = if active {
-        (0..t.cats.len()).map(|c| (c, t.nodes[id].kids.iter().copied().find(|&k| t.nodes[k].own_cat == Some(c)))).collect()
+        (0..t.cats.len())
+            .map(|c| {
+                (
+                    c,
+                    t.nodes[id]
+                        .kids
+                        .iter()
+                        .copied()
+                        .find(|&k| t.nodes[k].own_cat == Some(c)),
+                )
+            })
+            .collect()
     } else {
-        t.nodes[id].kids.iter().filter_map(|&k| t.nodes[k].own_cat.map(|c| (c, Some(k)))).collect()
+        t.nodes[id]
+            .kids
+            .iter()
+            .filter_map(|&k| t.nodes[k].own_cat.map(|c| (c, Some(k))))
+            .collect()
     };
     slots.sort_by_key(|&(c, _)| (t.cats[c].tier, c));
     let mut rows: Vec<Line> = Vec::new();
@@ -223,20 +249,44 @@ fn beak_rows(t: &Tree, id: usize, active: bool, ctx: &Ctx) -> Vec<Line> {
             });
             cur = Some(tier);
         } else {
-            rows.last_mut().unwrap().spans.push(sp(Cls::Brack, if ctx.tight { "," } else { ", " }));
+            rows.last_mut()
+                .unwrap()
+                .spans
+                .push(sp(Cls::Brack, if ctx.tight { "," } else { ", " }));
         }
         let r = rows.last_mut().unwrap();
-        r.spans.push(own(sp(Cls::CatName(c), t.cats[c].name.clone()), k));
+        r.spans
+            .push(own(sp(Cls::CatName(c), t.cats[c].name.clone()), k));
         // Tight rows drop the `:0` of empty slots; the name still takes clicks.
         if n > 0 || !ctx.tight {
-            r.spans.push(own(sp(if n == 0 { Cls::Sucker(None) } else { Cls::Count }, format!(":{n}")), k));
+            r.spans.push(own(
+                sp(
+                    if n == 0 {
+                        Cls::Sucker(None)
+                    } else {
+                        Cls::Count
+                    },
+                    format!(":{n}"),
+                ),
+                k,
+            ));
         }
         if let Some(kk) = k
             && k == ctx.active
         {
             // Browsing a slot: it is the active folder, marked in place.
             let len = t.nodes[kk].files.len();
-            r.spans.push(own(sp(Cls::Cursor, format!(" ◄{}/{}", ctx.cursor.min(len.saturating_sub(1)) + usize::from(len > 0), len)), k));
+            r.spans.push(own(
+                sp(
+                    Cls::Cursor,
+                    format!(
+                        " ◄{}/{}",
+                        ctx.cursor.min(len.saturating_sub(1)) + usize::from(len > 0),
+                        len
+                    ),
+                ),
+                k,
+            ));
         }
         if let Some(k) = k {
             r.tags.push(k);
@@ -251,7 +301,12 @@ fn beak_rows(t: &Tree, id: usize, active: bool, ctx: &Ctx) -> Vec<Line> {
 /// Visible arms (non-category subdirs) and ink paging.
 /// Returns (visible, hidden, page, pages).
 pub fn arms(t: &Tree, id: usize, active: bool) -> (Vec<usize>, usize, usize, usize) {
-    let plain: Vec<usize> = t.nodes[id].kids.iter().copied().filter(|&k| t.nodes[k].own_cat.is_none()).collect();
+    let plain: Vec<usize> = t.nodes[id]
+        .kids
+        .iter()
+        .copied()
+        .filter(|&k| t.nodes[k].own_cat.is_none())
+        .collect();
     let has_beak = active || plain.len() < t.nodes[id].kids.len();
     let cap = ARMS - usize::from(has_beak);
     if plain.len() <= cap {
@@ -298,7 +353,10 @@ fn suckers(files: &[FileEntry], cells_max: usize) -> Vec<Span> {
             alloc[i].1 += 1;
             left -= 1;
         }
-        alloc.iter().flat_map(|&(c, n, _)| std::iter::repeat_n(c, n)).collect()
+        alloc
+            .iter()
+            .flat_map(|&(c, n, _)| std::iter::repeat_n(c, n))
+            .collect()
     };
     let mut out: Vec<Span> = Vec::new();
     for c in cells {
@@ -319,10 +377,16 @@ fn label(t: &Tree, id: usize, ctx: &Ctx) -> Line {
     }
     let on = ctx.active == Some(id);
     s.push(sp(Cls::Brack, "["));
-    s.push(sp(if on { Cls::Active } else { Cls::Name }, cut(&n.name, ctx.names)));
+    s.push(sp(
+        if on { Cls::Active } else { Cls::Name },
+        cut(&n.name, ctx.names),
+    ));
     s.push(sp(Cls::Brack, "]"));
     if on && !n.files.is_empty() {
-        s.push(sp(Cls::Cursor, format!(" {}/{}", ctx.cursor + 1, n.files.len())));
+        s.push(sp(
+            Cls::Cursor,
+            format!(" {}/{}", ctx.cursor + 1, n.files.len()),
+        ));
     }
     if !n.files.is_empty() {
         if ctx.suckers > 0 {
@@ -340,7 +404,13 @@ fn label(t: &Tree, id: usize, ctx: &Ctx) -> Line {
     for x in &mut s {
         x.node = Some(id);
     }
-    Line { spans: s, tags: vec![id], heads: vec![id], kind: Kind::Label, key: Key::Label(id) }
+    Line {
+        spans: s,
+        tags: vec![id],
+        heads: vec![id],
+        kind: Kind::Label,
+        key: Key::Label(id),
+    }
 }
 
 /// A folder name cut to `max` columns with `..`; 0 never cuts.
@@ -355,7 +425,10 @@ fn cut(name: &str, max: usize) -> String {
 
 fn ink(id: usize, hidden: usize, p: usize, pages: usize) -> Line {
     Line {
-        spans: vec![own(sp(Cls::Ink, format!("~[ink +{hidden}] {}/{pages} ►", p + 1)), Some(id))],
+        spans: vec![own(
+            sp(Cls::Ink, format!("~[ink +{hidden}] {}/{pages} ►", p + 1)),
+            Some(id),
+        )],
         tags: vec![id],
         heads: vec![],
         kind: Kind::Ink,
@@ -384,31 +457,62 @@ pub struct Ctx {
 
 impl Default for Ctx {
     fn default() -> Self {
-        Ctx { active: None, cursor: 0, suckers: SUCKER_CELLS, stack: false, names: 0, tight: false, cols: 0 }
+        Ctx {
+            active: None,
+            cursor: 0,
+            suckers: SUCKER_CELLS,
+            stack: false,
+            names: 0,
+            tight: false,
+            cols: 0,
+        }
     }
 }
 
 impl Ctx {
     pub fn viewer(active: usize, cursor: usize) -> Ctx {
-        Ctx { active: Some(active), cursor, ..Ctx::default() }
+        Ctx {
+            active: Some(active),
+            cursor,
+            ..Ctx::default()
+        }
     }
     /// This context at reflow level `l` (see `REFLOW`).
     pub fn level(self, l: usize) -> Ctx {
         let (suckers, stack, names, tight) = REFLOW[l.min(REFLOW.len() - 1)];
-        Ctx { suckers, stack, names, tight, ..self }
+        Ctx {
+            suckers,
+            stack,
+            names,
+            tight,
+            ..self
+        }
     }
 }
 
 /// Beak tiers as arms hung on the spine, for the stacked reflow.
 fn beak_arms(rows: Vec<Line>) -> Vec<Arm> {
-    rows.into_iter().map(|l| Arm { b: Block::one(l), side: Side::Down, beak: true }).collect()
+    rows.into_iter()
+        .map(|l| Arm {
+            b: Block::one(l),
+            side: Side::Down,
+            beak: true,
+        })
+        .collect()
 }
 
 fn block(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx) -> Block {
     block_with_labels(t, id, depth, style, ctx, &|id, cx| label(t, id, cx))
 }
 
-fn block_with_labels(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx, labels: &dyn Fn(usize, &Ctx) -> Line) -> Block {
+fn block_with_labels(
+    t: &Tree,
+    id: usize,
+    depth: usize,
+    style: Style,
+    ctx: &Ctx,
+    labels: &dyn Fn(usize, &Ctx) -> Line,
+) -> Block {
     let lab = labels(id, ctx);
     let n = &t.nodes[id];
     let is_active = ctx.active == Some(id);
@@ -432,7 +536,15 @@ fn block_with_labels(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx,
     }
     let rows = beak_rows(t, id, ctx.active == Some(id), ctx);
     let (vis, hidden, p, pages) = arms(t, id, ctx.active == Some(id));
-    let mut kids: Vec<Arm> = vis.iter().map(|&k| arm(block_with_labels(t, k, depth + 1, style, ctx, labels), t.nodes[k].side)).collect();
+    let mut kids: Vec<Arm> = vis
+        .iter()
+        .map(|&k| {
+            arm(
+                block_with_labels(t, k, depth + 1, style, ctx, labels),
+                t.nodes[k].side,
+            )
+        })
+        .collect();
     if hidden > 0 {
         let side = kids.last().map_or(Side::Down, |k| k.side);
         kids.push(arm(Block::one(ink(id, hidden, p, pages)), side));
@@ -452,11 +564,19 @@ fn block_with_labels(t: &Tree, id: usize, depth: usize, style: Style, ctx: &Ctx,
             fan(lab, all, depth, fold)
         }
         Style::Arm => {
-            let head = if beak.is_empty() { Block::one(lab) } else { fan(lab, beak, depth, fold) };
+            let head = if beak.is_empty() {
+                Block::one(lab)
+            } else {
+                fan(lab, beak, depth, fold)
+            };
             trunk(head, kids, depth)
         }
         Style::Boxed => {
-            let head = if beak.is_empty() { Block::one(lab) } else { boxed(id, lab, beak, depth, fold) };
+            let head = if beak.is_empty() {
+                Block::one(lab)
+            } else {
+                boxed(id, lab, beak, depth, fold)
+            };
             trunk(head, kids, depth)
         }
     }
@@ -503,7 +623,11 @@ fn trunk(head: Block, kids: Vec<Arm>, depth: usize) -> Block {
             } else {
                 "│  "
             };
-            let cls = if r == a && k.beak { Cls::BeakTrunk(depth) } else { c };
+            let cls = if r == a && k.beak {
+                Cls::BeakTrunk(depth)
+            } else {
+                c
+            };
             out.push(l.front(vec![sp(cls, pre)]));
         }
     }
@@ -543,7 +667,13 @@ fn fan(lab: Line, kids: Vec<Block>, depth: usize, fold: Fold) -> Block {
                 (Some(0), false) => '┌',
                 (Some(i), false) if i == last => '└',
                 (Some(_), false) => '├',
-                (None, false) => if r > a0 && r < al { '│' } else { ' ' },
+                (None, false) => {
+                    if r > a0 && r < al {
+                        '│'
+                    } else {
+                        ' '
+                    }
+                }
             }
         };
         let tail = if ai.is_some() { "─ " } else { "  " };
@@ -562,7 +692,10 @@ fn fan(lab: Line, kids: Vec<Block>, depth: usize, fold: Fold) -> Block {
         pre.push(sp(c, format!("{g}{tail}")));
         out.push(l.front(pre));
     }
-    Block { lines: out, anchor: p }
+    Block {
+        lines: out,
+        anchor: p,
+    }
 }
 
 /// Boxtobrachial beak: tier rows in a box hooked to the label with ─┤.
@@ -579,7 +712,10 @@ fn boxed(id: usize, lab: Line, rows: Vec<Block>, depth: usize, fold: Fold) -> Bl
     let lw = lab.width() + 3;
     let tags: Vec<usize> = rows.iter().flat_map(|l| l.tags.clone()).collect();
     let edge = |l: &str, r: &str, top: bool| Line {
-        spans: vec![sp(Cls::Plain, " ".repeat(lw)), sp(c, format!("{l}{}{r}", "─".repeat(w + 2)))],
+        spans: vec![
+            sp(Cls::Plain, " ".repeat(lw)),
+            sp(c, format!("{l}{}{r}", "─".repeat(w + 2))),
+        ],
         tags: tags.clone(),
         heads: vec![],
         kind: Kind::Border,
@@ -604,7 +740,10 @@ fn boxed(id: usize, lab: Line, rows: Vec<Block>, depth: usize, fold: Fold) -> Bl
         out.push(l.front(pre));
     }
     out.push(edge("└", "┘", false));
-    Block { lines: out, anchor: at + 1 }
+    Block {
+        lines: out,
+        anchor: at + 1,
+    }
 }
 
 /// Rendered tree plus row lookups for the tide engine.
@@ -619,14 +758,20 @@ impl Frame {
     /// Row a node shows on: its label, or for a category folder, the beak
     /// row that holds its slot.
     pub fn row_of(&self, id: usize) -> Option<usize> {
-        self.row(id).or_else(|| self.lines.iter().position(|l| l.kind == Kind::Beak && l.tags.contains(&id)))
+        self.row(id).or_else(|| {
+            self.lines
+                .iter()
+                .position(|l| l.kind == Kind::Beak && l.tags.contains(&id))
+        })
     }
     /// Widest line, in columns.
     pub fn width(&self) -> usize {
         self.lines.iter().map(Line::width).max().unwrap_or(0)
     }
     pub fn ink_row(&self, id: usize) -> Option<usize> {
-        self.lines.iter().position(|l| l.kind == Kind::Ink && l.tags[0] == id)
+        self.lines
+            .iter()
+            .position(|l| l.kind == Kind::Ink && l.tags[0] == id)
     }
     /// First and last rows a subtree occupies.
     pub fn span(&self, t: &Tree, id: usize) -> (usize, usize) {
@@ -649,7 +794,9 @@ pub fn render(t: &Tree, style: Style, ctx: &Ctx) -> Frame {
     if ctx.cols > 0 {
         return fit(t, style, ctx, ctx.cols).0;
     }
-    Frame { lines: block(t, 0, 0, style, ctx).lines }
+    Frame {
+        lines: block(t, 0, 0, style, ctx).lines,
+    }
 }
 
 /// Render at the widest reflow level that fits `cols`. Returns the frame
@@ -657,7 +804,14 @@ pub fn render(t: &Tree, style: Style, ctx: &Ctx) -> Frame {
 pub fn fit(t: &Tree, style: Style, ctx: &Ctx, cols: usize) -> (Frame, usize) {
     let mut last = None;
     for l in 0..REFLOW.len() {
-        let f = render(t, style, &Ctx { cols: 0, ..ctx.level(l) });
+        let f = render(
+            t,
+            style,
+            &Ctx {
+                cols: 0,
+                ..ctx.level(l)
+            },
+        );
         if f.width() <= cols {
             return (f, l);
         }
@@ -672,12 +826,21 @@ pub fn height(t: &Tree, id: usize, style: Style, ctx: &Ctx) -> usize {
 
 /// Reuse OTF composition, paging, mirroring and reflow with labels supplied
 /// by a read-only filesystem projection. Category rendering is unchanged.
-pub fn outline(t: &Tree, style: Style, cols: usize, labels: &dyn Fn(usize, &Ctx) -> Line) -> (Frame, Ctx) {
+pub fn outline(
+    t: &Tree,
+    style: Style,
+    cols: usize,
+    labels: &dyn Fn(usize, &Ctx) -> Line,
+) -> (Frame, Ctx) {
     let mut last = None;
     for level in 0..REFLOW.len() {
         let cx = Ctx::default().level(level);
-        let frame = Frame { lines: block_with_labels(t, 0, 0, style, &cx, labels).lines };
-        if cols == 0 || frame.width() <= cols { return (frame, cx); }
+        let frame = Frame {
+            lines: block_with_labels(t, 0, 0, style, &cx, labels).lines,
+        };
+        if cols == 0 || frame.width() <= cols {
+            return (frame, cx);
+        }
         last = Some((frame, cx));
     }
     last.unwrap()

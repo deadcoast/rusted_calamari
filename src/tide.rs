@@ -8,7 +8,7 @@
 //! descendants retract (deepest first) until it fits. Each probe is one O(visible rows) render, so a click costs a
 //! handful of renders at most.
 
-use crate::layout::{height, render, Ctx, Style};
+use crate::layout::{Ctx, Style, height, render};
 use crate::tree::{Fold, Side, Tree};
 
 pub struct View {
@@ -31,29 +31,68 @@ pub struct Probe {
 pub enum Trip {
     Leaf,
     Folded,
-    Paged { page: usize },
-    Fit { side: Side, fold: Fold, p: Probe },
-    Mirrored { side: Side, fold: Fold, snag: Probe, p: Probe },
+    Paged {
+        page: usize,
+    },
+    Fit {
+        side: Side,
+        fold: Fold,
+        p: Probe,
+    },
+    Mirrored {
+        side: Side,
+        fold: Fold,
+        snag: Probe,
+        p: Probe,
+    },
     /// No shape fits at the pinned row; the clicked row slides `by` rows.
-    Slid { side: Side, fold: Fold, by: isize, p: Probe },
+    Slid {
+        side: Side,
+        fold: Fold,
+        by: isize,
+        p: Probe,
+    },
     /// Own open descendants folded so the subtree fits the viewport.
-    Retracted { side: Side, fold: Fold, arms: Vec<usize>, by: isize, p: Probe },
-    Clipped { side: Side, p: Probe },
-    Balanced { up: usize, down: usize },
+    Retracted {
+        side: Side,
+        fold: Fold,
+        arms: Vec<usize>,
+        by: isize,
+        p: Probe,
+    },
+    Clipped {
+        side: Side,
+        p: Probe,
+    },
+    Balanced {
+        up: usize,
+        down: usize,
+    },
 }
 
 /// An arm already hanging above the mantle keeps growing upward;
 /// everything else opens downward.
 fn preferred(t: &Tree, id: usize) -> Side {
-    if t.nodes[id].side == Side::Up && t.nodes[id].parent.is_some() { Side::Up } else { Side::Down }
+    if t.nodes[id].side == Side::Up && t.nodes[id].parent.is_some() {
+        Side::Up
+    } else {
+        Side::Down
+    }
 }
 
 /// Probe order. The beak flexes before the arms mirror; hier(a) sits at the
 /// top of every beak, so `Fold::Up` (tiers folded above the label) is tried
 /// before `Fold::Down`.
 fn shapes(style: Style, pref: Side) -> Vec<(Side, Fold)> {
-    let sides: &[Side] = if style == Style::Beak { &[Side::Down] } else { &[pref, pref.flip()] };
-    sides.iter().flat_map(|&s| [Fold::Mid, Fold::Up, Fold::Down].map(|f| (s, f))).collect()
+    let sides: &[Side] = if style == Style::Beak {
+        &[Side::Down]
+    } else {
+        &[pref, pref.flip()]
+    };
+    sides
+        .iter()
+        .flat_map(|&s| [Fold::Mid, Fold::Up, Fold::Down].map(|f| (s, f)))
+        .collect()
 }
 
 fn shape(t: &mut Tree, id: usize, (side, fold): (Side, Fold)) {
@@ -79,7 +118,13 @@ fn probe(t: &Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, rs: usize) 
     let room_down = v.rows.saturating_sub(rs + 1);
     let up = row - lo;
     let down = hi - row;
-    Probe { ok: up <= room_up && down <= room_down, up, down, room_up, room_down }
+    Probe {
+        ok: up <= room_up && down <= room_down,
+        up,
+        down,
+        room_up,
+        room_down,
+    }
 }
 
 /// After something shrinks, pull hidden rows back down into blank space.
@@ -122,7 +167,15 @@ fn slide(p: &Probe, rows: usize) -> Option<isize> {
 }
 
 /// Try every shape at the pinned row, then the smallest slide.
-fn place(t: &mut Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, rs: usize, order: &[(Side, Fold)]) -> Option<((Side, Fold), Probe, isize)> {
+fn place(
+    t: &mut Tree,
+    v: &mut View,
+    style: Style,
+    ctx: &Ctx,
+    id: usize,
+    rs: usize,
+    order: &[(Side, Fold)],
+) -> Option<((Side, Fold), Probe, isize)> {
     let mut best: Option<((Side, Fold), Probe, isize)> = None;
     for &sh in order {
         shape(t, id, sh);
@@ -148,15 +201,25 @@ fn place(t: &mut Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, rs: usi
 pub fn balance(t: &mut Tree, style: Style, ctx: &Ctx) -> (usize, usize) {
     let kids = t.nodes[0].kids.clone();
     for &k in &kids {
-        t.nodes[k].side = if t.tier(k) == Some('a') { Side::Up } else { Side::Down };
+        t.nodes[k].side = if t.tier(k) == Some('a') {
+            Side::Up
+        } else {
+            Side::Down
+        };
     }
     let h: Vec<usize> = kids.iter().map(|&k| height(t, k, style, ctx)).collect();
     let sum = |t: &Tree, s: Side| -> usize {
-        kids.iter().zip(&h).filter(|(k, _)| t.nodes[**k].side == s).map(|(_, h)| h).sum()
+        kids.iter()
+            .zip(&h)
+            .filter(|(k, _)| t.nodes[**k].side == s)
+            .map(|(_, h)| h)
+            .sum()
     };
     loop {
         let (up, down) = (sum(t, Side::Up), sum(t, Side::Down));
-        let Some(i) = kids.iter().position(|&k| t.nodes[k].side == Side::Down) else { break };
+        let Some(i) = kids.iter().position(|&k| t.nodes[k].side == Side::Down) else {
+            break;
+        };
         let (nu, nd) = (up + h[i], down - h[i]);
         if nu.abs_diff(nd) < up.abs_diff(down) {
             t.nodes[kids[i]].side = Side::Up;
@@ -181,7 +244,9 @@ pub fn click(t: &mut Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, on_
         let r = f.ink_row(id).unwrap_or(row);
         v.scroll = r.saturating_sub(rs);
         fill(t, v, style, ctx);
-        return Trip::Paged { page: t.nodes[id].page };
+        return Trip::Paged {
+            page: t.nodes[id].page,
+        };
     }
     if t.nodes[id].kids.is_empty() {
         return Trip::Leaf;
@@ -210,7 +275,12 @@ pub fn click(t: &mut Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, on_
             let (side, fold) = sh;
             return match snag {
                 None => Trip::Fit { side, fold, p },
-                Some(s) => Trip::Mirrored { side, fold, snag: s, p },
+                Some(s) => Trip::Mirrored {
+                    side,
+                    fold,
+                    snag: s,
+                    p,
+                },
             };
         }
         snag.get_or_insert(p);
@@ -224,15 +294,36 @@ pub fn click(t: &mut Tree, v: &mut View, style: Style, ctx: &Ctx, id: usize, on_
         t.nodes[victim].open = false;
         gone.push(victim);
         if let Some(((side, fold), p, by)) = place(t, v, style, ctx, id, rs, &order) {
-            return Trip::Retracted { side, fold, arms: gone, by, p };
+            return Trip::Retracted {
+                side,
+                fold,
+                arms: gone,
+                by,
+                p,
+            };
         }
     }
 
     // Nothing left to retract: open toward the larger room and let the
     // clicked row slide to that edge.
     let p = probe(t, v, style, ctx, id, rs);
-    let side = if p.room_up > p.room_down && style != Style::Beak { Side::Up } else { pref };
-    shape(t, id, (side, if side == Side::Up { Fold::Up } else { Fold::Down }));
+    let side = if p.room_up > p.room_down && style != Style::Beak {
+        Side::Up
+    } else {
+        pref
+    };
+    shape(
+        t,
+        id,
+        (
+            side,
+            if side == Side::Up {
+                Fold::Up
+            } else {
+                Fold::Down
+            },
+        ),
+    );
     let p = probe(t, v, style, ctx, id, rs);
     let f = render(t, style, ctx);
     let row = f.row(id).unwrap_or(0);

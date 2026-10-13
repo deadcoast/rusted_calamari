@@ -12,6 +12,15 @@ path = "src/lib.rs"
 name = "rusted-calamari"
 path = "src/main.rs"
 
+[[bin]]
+name = "calamari-workspace-smoke"
+path = "src/smoke_main.rs"
+required-features = ["workspace-smoke"]
+test = false
+
+[features]
+workspace-smoke = []
+
 [dependencies]
 eframe = { version = "0.36", features = ["persistence"] }
 image = "0.25"

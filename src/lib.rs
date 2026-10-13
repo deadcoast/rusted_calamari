@@ -15,6 +15,6 @@ pub mod paint;
 pub mod tide;
 pub mod tree;
 
-pub use layout::{render, Frame, Style};
-pub use tide::{click, Trip, View};
+pub use layout::{Frame, Style, render};
+pub use tide::{Trip, View, click};
 pub use tree::{Side, Tree};

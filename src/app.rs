@@ -4,39 +4,48 @@
 
 use crate::focus::{self, Focus, Stage};
 use crate::fonts::{self, FACES, SIZES};
-use crate::glyph::{run_at, Grid, Run};
+use crate::glyph::{Grid, Run, run_at};
 use crate::loader::{Loader, Slot};
 use crate::saver::Saver;
-use crate::theme::{self, chip, chipa, dialog, dropdown, r, ra, rd, Item, Row, ROUND, RULE, DIM, EDGE, IRON, IRON_HI, MUTED, PANEL, RUST, RUST_HI, SHADOW, STAGE, TEXT, WARN};
+use crate::theme::{
+    self, DIM, EDGE, IRON, IRON_HI, Item, MUTED, PANEL, ROUND, RULE, RUST, RUST_HI, Row, SHADOW,
+    STAGE, TEXT, WARN, chip, chipa, dialog, dropdown, r, ra, rd,
+};
 use crate::toolbar::{self, Tool};
 use crate::treeview::Motion;
 use crate::window::{self, Ctl};
-use eframe::egui::{self, Area, Color32, CursorIcon, Event, Id, Key, LayerId, Order, Pos2, Rect, Sense, Stroke, StrokeKind, TextEdit, Vec2, ViewportCommand};
+use eframe::egui::{
+    self, Area, Color32, CursorIcon, Event, Id, Key, LayerId, Order, Pos2, Rect, Sense, Stroke,
+    StrokeKind, TextEdit, Vec2, ViewportCommand,
+};
 use egui_phosphor::bold as ph;
 use image::DynamicImage;
 use octo::config::{self, Cat, Rgb};
-use octo::layout::{render, Cls, Ctx, Kind, Line, Style};
+use octo::layout::{Cls, Ctx, Kind, Line, Style, render};
 use octo::ops::{self, Op};
 use octo::paint::colour;
-use octo::tide::{self, balance, View};
-use octo::tree::{is_decodable, Tree, IMAGES, OTHER_MEDIA};
+use octo::tide::{self, View, balance};
+use octo::tree::{IMAGES, OTHER_MEDIA, Tree, is_decodable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[path = "workspace.rs"]
 mod workspace;
+#[cfg(feature = "workspace-smoke")]
+#[path = "workspace_smoke.rs"]
+mod workspace_smoke;
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod workspace_tests;
-use crate::dock::{Dock, FoldClicks, FoldGesture, Widget};
 use crate::browserpane::Files;
+use crate::dock::{Dock, FoldClicks, FoldGesture, Widget};
 
 const STYLES: [Style; 3] = [Style::Arm, Style::Beak, Style::Boxed];
 const STYLE_NAMES: [&str; 3] = ["Octobrachial Arm", "Octobrachial Beak", "Boxtobrachial"];
 const SWATCHES: [&str; 12] = [
-    "#e56399", "#92CC7C", "#7f96ff", "#a6cfd5", "#E6D463", "#F0A35E", "#c792ea", "#ff8a65", "#4dd0e1", "#aed581",
-    "#f06292", "#9fa8da",
+    "#e56399", "#92CC7C", "#7f96ff", "#a6cfd5", "#E6D463", "#F0A35E", "#c792ea", "#ff8a65",
+    "#4dd0e1", "#aed581", "#f06292", "#9fa8da",
 ];
 /// Keys the app keeps; categories cannot take them.
 const RESERVED: [&str; 2] = ["h", "0"];
@@ -57,7 +66,12 @@ const PREVIEW: u32 = 2560;
 
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color32::from_rgba_premultiplied(f(a.r(), b.r()), f(a.g(), b.g()), f(a.b(), b.b()), f(a.a(), b.a()))
+    Color32::from_rgba_premultiplied(
+        f(a.r(), b.r()),
+        f(a.g(), b.g()),
+        f(a.b(), b.b()),
+        f(a.a(), b.a()),
+    )
 }
 
 /// A path without Windows' verbatim prefix: `canonicalize` there returns
@@ -151,13 +165,26 @@ struct Lib {
 /// stacks trade entries and never drift apart.
 enum Undo {
     /// The file went from `from/from_name` to `to/to_name`.
-    Move { from: usize, to: usize, from_name: String, to_name: String },
+    Move {
+        from: usize,
+        to: usize,
+        from_name: String,
+        to_name: String,
+    },
     /// The file went from `node/name` to the trash, as `trashed`.
-    Trash { node: usize, name: String, trashed: PathBuf },
+    Trash {
+        node: usize,
+        name: String,
+        trashed: PathBuf,
+    },
     /// The file came back from the trash to `node/name`.
     Untrash { node: usize, name: String },
     /// `node/name` held `bytes` before it was written (a save, a DANGER crop).
-    Saved { node: usize, name: String, bytes: Vec<u8> },
+    Saved {
+        node: usize,
+        name: String,
+        bytes: Vec<u8>,
+    },
     /// `op` was added to the file's pending edits.
     Op { path: PathBuf, op: Op },
     /// `op` was taken off the file's pending edits.
@@ -397,11 +424,16 @@ pub struct App {
     main_rect: Option<Rect>,
     snap_zone: Option<Rect>,
     next_library: Option<(PathBuf, Option<PathBuf>)>,
+    #[cfg(feature = "workspace-smoke")]
+    smoke: Option<workspace_smoke::Smoke>,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, arg: Option<PathBuf>) -> App {
-        let s: Settings = cc.storage.and_then(|st| eframe::get_value(st, "rusted-calamari")).unwrap_or_default();
+        let s: Settings = cc
+            .storage
+            .and_then(|st| eframe::get_value(st, "rusted-calamari"))
+            .unwrap_or_default();
         Self::with_settings(cc.egui_ctx.clone(), s, arg)
     }
 
@@ -425,7 +457,10 @@ impl App {
             loader: Loader::new(ctx.clone()),
             saver: Saver::new(ctx.clone()),
             egui: ctx.clone(),
-            view: View { rows: 40, scroll: 0 },
+            view: View {
+                rows: 40,
+                scroll: 0,
+            },
             dialog: Dialog::None,
             menu: None,
             chrome_hover: false,
@@ -473,12 +508,19 @@ impl App {
             main_rect: None,
             snap_zone: None,
             next_library: None,
+            #[cfg(feature = "workspace-smoke")]
+            smoke: None,
         };
         let start = arg.or_else(|| app.s.library.clone()).filter(|p| p.is_dir());
         if let Some(p) = start {
             app.open_library(&p, 0.0);
         }
-        let files_root = app.s.files_root.clone().or_else(|| app.s.library.clone()).unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let files_root = app
+            .s
+            .files_root
+            .clone()
+            .or_else(|| app.s.library.clone())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         app.files.start(&ctx, files_root);
         app
     }
@@ -493,7 +535,10 @@ impl App {
 
     /// The viewer's context for the tree, reflowed to `cols` (0: full detail).
     fn ctx_of(lib: &Lib, cols: usize) -> Ctx {
-        Ctx { cols, ..Ctx::viewer(lib.active, lib.cursor) }
+        Ctx {
+            cols,
+            ..Ctx::viewer(lib.active, lib.cursor)
+        }
     }
 
     /// Log an undoable step. Anything new forfeits what was undone.
@@ -511,7 +556,11 @@ impl App {
         match Tree::scan(&p, config::load(&p)) {
             Ok(mut tree) => {
                 balance(&mut tree, self.style(), &Ctx::viewer(0, 0));
-                self.lib = Some(Lib { tree, active: 0, cursor: 0 });
+                self.lib = Some(Lib {
+                    tree,
+                    active: 0,
+                    cursor: 0,
+                });
                 self.s.library = Some(p);
                 self.view.scroll = 0;
                 self.undo.clear();
@@ -530,7 +579,10 @@ impl App {
                 self.reset_view();
                 true
             }
-            Err(e) => { self.say(format!("Can't open {}: {e}", p.display()), WARN, now); false }
+            Err(e) => {
+                self.say(format!("Can't open {}: {e}", p.display()), WARN, now);
+                false
+            }
         }
     }
 
@@ -609,7 +661,9 @@ impl App {
         let from = self.img_rect;
         let Some(lib) = self.lib.as_mut() else { return };
         let a = lib.active;
-        let Some(f) = lib.tree.nodes[a].files.get(lib.cursor).cloned() else { return };
+        let Some(f) = lib.tree.nodes[a].files.get(lib.cursor).cloned() else {
+            return;
+        };
         let dir = lib.tree.dir(a);
         let src = dir.join(&f.name);
         let cname = lib.tree.cats[cat].name.clone();
@@ -633,12 +687,27 @@ impl App {
                 lib.tree.put_file(d, &n);
                 let len = lib.tree.nodes[a].files.len();
                 lib.cursor = lib.cursor.min(len.saturating_sub(1));
-                self.record(Undo::Move { from: a, to: d, from_name: f.name, to_name: n });
+                self.record(Undo::Move {
+                    from: a,
+                    to: d,
+                    from_name: f.name,
+                    to_name: n,
+                });
                 match from {
-                    Some(r) => self.fly.push(Fly { tex, uv, from: r, cat, t0: now }),
+                    Some(r) => self.fly.push(Fly {
+                        tex,
+                        uv,
+                        from: r,
+                        cat,
+                        t0: now,
+                    }),
                     None => self.landing = Some((cat, now)),
                 }
-                self.flash = Some(Flash { node: d, cat, t0: now });
+                self.flash = Some(Flash {
+                    node: d,
+                    cat,
+                    t0: now,
+                });
                 self.crop = None;
                 self.reset_view();
             }
@@ -663,7 +732,11 @@ impl App {
                 lib.tree.take_file(a, &name);
                 let len = lib.tree.nodes[a].files.len();
                 lib.cursor = lib.cursor.min(len.saturating_sub(1));
-                self.record(Undo::Trash { node: a, name, trashed: td.join(n) });
+                self.record(Undo::Trash {
+                    node: a,
+                    name,
+                    trashed: td.join(n),
+                });
             }
             Err(e) => self.say(format!("Couldn't trash {name}: {e}"), WARN, now),
         }
@@ -671,10 +744,22 @@ impl App {
 
     // ── edits ────────────────────────────────────────────────────────
 
-    fn preview(ctx: &egui::Context, base: &DynamicImage, ops: &[Op], path: &Path) -> egui::TextureHandle {
+    fn preview(
+        ctx: &egui::Context,
+        base: &DynamicImage,
+        ops: &[Op],
+        path: &Path,
+    ) -> egui::TextureHandle {
         let img = ops::apply(base.clone(), ops).to_rgba8();
-        let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
-        ctx.load_texture(format!("edit:{}", path.display()), ci, egui::TextureOptions::LINEAR)
+        let ci = egui::ColorImage::from_rgba_unmultiplied(
+            [img.width() as usize, img.height() as usize],
+            img.as_raw(),
+        );
+        ctx.load_texture(
+            format!("edit:{}", path.display()),
+            ci,
+            egui::TextureOptions::LINEAR,
+        )
     }
 
     fn push_op(&mut self, ctx: &egui::Context, op: Op, now: f64) {
@@ -702,9 +787,21 @@ impl App {
         if !self.pending.contains_key(path) {
             let img = ops::decode(path).map_err(|e| format!("Can't edit: {e}"))?;
             let full = [img.width(), img.height()];
-            let base = if full[0].max(full[1]) > PREVIEW { img.thumbnail(PREVIEW, PREVIEW) } else { img };
+            let base = if full[0].max(full[1]) > PREVIEW {
+                img.thumbnail(PREVIEW, PREVIEW)
+            } else {
+                img
+            };
             let tex = Self::preview(ctx, &base, &[], path);
-            self.pending.insert(path.to_path_buf(), Pending { ops: Vec::new(), base, full, tex });
+            self.pending.insert(
+                path.to_path_buf(),
+                Pending {
+                    ops: Vec::new(),
+                    base,
+                    full,
+                    tex,
+                },
+            );
         }
         let p = self.pending.get_mut(path).unwrap();
         p.ops.push(op);
@@ -714,7 +811,9 @@ impl App {
 
     fn save(&mut self, path: &Path, now: f64) -> bool {
         self.settle(true);
-        let Some(p) = self.pending.get(path) else { return true };
+        let Some(p) = self.pending.get(path) else {
+            return true;
+        };
         match ops::save_ops(path, &p.ops) {
             Ok(bytes) => {
                 self.saved(path, bytes);
@@ -732,10 +831,16 @@ impl App {
     fn saved(&mut self, path: &Path, bytes: Vec<u8>) {
         self.pending.remove(path);
         self.loader.forget(path);
-        self.undo.retain(|u| !matches!(u, Undo::Op { path: q, .. } if q == path));
+        self.undo
+            .retain(|u| !matches!(u, Undo::Op { path: q, .. } if q == path));
         if let Some(lib) = &self.lib {
-            let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            if let Some(node) = (0..lib.tree.nodes.len()).find(|&i| Some(lib.tree.dir(i).as_path()) == path.parent()) {
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if let Some(node) = (0..lib.tree.nodes.len())
+                .find(|&i| Some(lib.tree.dir(i).as_path()) == path.parent())
+            {
                 self.record(Undo::Saved { node, name, bytes });
             }
         }
@@ -755,8 +860,14 @@ impl App {
     fn export_as(&mut self, now: f64) {
         self.settle(true);
         let Some(path) = self.current() else { return };
-        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "image".into());
-        let ext = path.extension().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_else(|| "png".into());
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "image".into());
+        let ext = path
+            .extension()
+            .map(|s| s.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_else(|| "png".into());
         let Some(dest) = rfd::FileDialog::new()
             .set_title("Export as")
             .set_directory(path.parent().unwrap_or(Path::new(".")))
@@ -770,15 +881,25 @@ impl App {
         else {
             return;
         };
-        let ops = self.pending.get(&path).map(|p| p.ops.clone()).unwrap_or_default();
+        let ops = self
+            .pending
+            .get(&path)
+            .map(|p| p.ops.clone())
+            .unwrap_or_default();
         match ops::export_ops(&path, &ops, &dest) {
             Ok(()) => {
                 // An export into the library shows up where it landed.
                 if let Some(lib) = self.lib.as_mut()
-                    && let Some(node) = (0..lib.tree.nodes.len()).find(|&i| Some(lib.tree.dir(i).as_path()) == dest.parent())
+                    && let Some(node) = (0..lib.tree.nodes.len())
+                        .find(|&i| Some(lib.tree.dir(i).as_path()) == dest.parent())
                 {
-                    let name = dest.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                    if octo::tree::is_media(&name) && !lib.tree.nodes[node].files.iter().any(|f| f.name == name) {
+                    let name = dest
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if octo::tree::is_media(&name)
+                        && !lib.tree.nodes[node].files.iter().any(|f| f.name == name)
+                    {
                         lib.tree.put_file(node, &name);
                     }
                 }
@@ -834,7 +955,9 @@ impl App {
 
     /// Show the image at (folder, index).
     fn focus(&mut self, at: Option<(usize, usize)>) {
-        let (Some((node, i)), Some(lib)) = (at, self.lib.as_mut()) else { return };
+        let (Some((node, i)), Some(lib)) = (at, self.lib.as_mut()) else {
+            return;
+        };
         if lib.active != node || lib.cursor != i {
             lib.active = node;
             lib.cursor = i;
@@ -848,7 +971,11 @@ impl App {
     /// reverses this and where the file now is; on failure, the entry back,
     /// untouched, with the reason.
     #[allow(clippy::type_complexity)]
-    fn invert(&mut self, ctx: &egui::Context, u: Undo) -> Result<(Undo, Option<(usize, usize)>), (String, Undo)> {
+    fn invert(
+        &mut self,
+        ctx: &egui::Context,
+        u: Undo,
+    ) -> Result<(Undo, Option<(usize, usize)>), (String, Undo)> {
         match u {
             Undo::Op { path, op } => {
                 if let Some(p) = self.pending.get_mut(&path) {
@@ -866,9 +993,16 @@ impl App {
                 Err(e) => Err((e, Undo::Unop { path, op })),
             },
             other => {
-                let Some(lib) = self.lib.as_mut() else { return Err(("no folder is open".into(), other)) };
+                let Some(lib) = self.lib.as_mut() else {
+                    return Err(("no folder is open".into(), other));
+                };
                 match other {
-                    Undo::Move { from, to, from_name, to_name } => {
+                    Undo::Move {
+                        from,
+                        to,
+                        from_name,
+                        to_name,
+                    } => {
                         let src = lib.tree.dir(to).join(&to_name);
                         match ops::move_into(&src, &lib.tree.dir(from), &from_name) {
                             Ok(n) => {
@@ -877,17 +1011,44 @@ impl App {
                                 self.snaps.remove(&src);
                                 lib.tree.take_file(to, &to_name);
                                 let i = lib.tree.put_file(from, &n);
-                                Ok((Undo::Move { from: to, to: from, from_name: to_name, to_name: n }, Some((from, i))))
+                                Ok((
+                                    Undo::Move {
+                                        from: to,
+                                        to: from,
+                                        from_name: to_name,
+                                        to_name: n,
+                                    },
+                                    Some((from, i)),
+                                ))
                             }
-                            Err(e) => Err((e.to_string(), Undo::Move { from, to, from_name, to_name })),
+                            Err(e) => Err((
+                                e.to_string(),
+                                Undo::Move {
+                                    from,
+                                    to,
+                                    from_name,
+                                    to_name,
+                                },
+                            )),
                         }
                     }
-                    Undo::Trash { node, name, trashed } => match ops::move_into(&trashed, &lib.tree.dir(node), &name) {
+                    Undo::Trash {
+                        node,
+                        name,
+                        trashed,
+                    } => match ops::move_into(&trashed, &lib.tree.dir(node), &name) {
                         Ok(n) => {
                             let i = lib.tree.put_file(node, &n);
                             Ok((Undo::Untrash { node, name: n }, Some((node, i))))
                         }
-                        Err(e) => Err((e.to_string(), Undo::Trash { node, name, trashed })),
+                        Err(e) => Err((
+                            e.to_string(),
+                            Undo::Trash {
+                                node,
+                                name,
+                                trashed,
+                            },
+                        )),
                     },
                     Undo::Untrash { node, name } => {
                         let path = lib.tree.dir(node).join(&name);
@@ -898,21 +1059,40 @@ impl App {
                                 self.loader.forget(&path);
                                 self.snaps.remove(&path);
                                 lib.tree.take_file(node, &name);
-                                Ok((Undo::Trash { node, name, trashed: td.join(n) }, None))
+                                Ok((
+                                    Undo::Trash {
+                                        node,
+                                        name,
+                                        trashed: td.join(n),
+                                    },
+                                    None,
+                                ))
                             }
                             Err(e) => Err((e.to_string(), Undo::Untrash { node, name })),
                         }
                     }
                     Undo::Saved { node, name, bytes } => {
                         let p = lib.tree.dir(node).join(&name);
-                        let swapped = std::fs::read(&p).and_then(|cur| ops::write_atomic(&p, &bytes).map(|_| cur));
+                        let swapped = std::fs::read(&p)
+                            .and_then(|cur| ops::write_atomic(&p, &bytes).map(|_| cur));
                         match swapped {
                             Ok(cur) => {
                                 self.pending.remove(&p);
                                 self.loader.forget(&p);
                                 self.snaps.remove(&p);
-                                let i = lib.tree.nodes[node].files.iter().position(|f| f.name == name).unwrap_or(0);
-                                Ok((Undo::Saved { node, name, bytes: cur }, Some((node, i))))
+                                let i = lib.tree.nodes[node]
+                                    .files
+                                    .iter()
+                                    .position(|f| f.name == name)
+                                    .unwrap_or(0);
+                                Ok((
+                                    Undo::Saved {
+                                        node,
+                                        name,
+                                        bytes: cur,
+                                    },
+                                    Some((node, i)),
+                                ))
                             }
                             Err(e) => Err((e.to_string(), Undo::Saved { node, name, bytes })),
                         }
@@ -931,7 +1111,12 @@ impl App {
             self.danger = false;
             self.quick = None;
             self.reset_view();
-            self.crop = Some(Crop { path, r: [0.0, 0.0, 1.0, 1.0], aspect: 0, grab: None });
+            self.crop = Some(Crop {
+                path,
+                r: [0.0, 0.0, 1.0, 1.0],
+                aspect: 0,
+                grab: None,
+            });
         }
     }
 
@@ -943,7 +1128,11 @@ impl App {
         // The picture the box was drawn on: pending edits first (they are
         // always made on the file as written), then a cut, then the decode.
         let shown = if let Some(pd) = self.pending.get(path) {
-            Some((pd.tex.clone(), full, ops::dims(pd.full[0], pd.full[1], &pd.ops)))
+            Some((
+                pd.tex.clone(),
+                full,
+                ops::dims(pd.full[0], pd.full[1], &pd.ops),
+            ))
         } else if let Some(s) = self.snap_live(path) {
             Some((s.tex.clone(), s.uv, s.px))
         } else if let Some(Slot::Ready { tex, size, .. }) = self.loader.get(path) {
@@ -955,11 +1144,24 @@ impl App {
         // Pending edits go into the same write, as a save would take them;
         // if the write fails they come back (see `settle`).
         let mut ops = self.pending.remove(path).map(|p| p.ops).unwrap_or_default();
-        self.undo.retain(|u| !matches!(u, Undo::Op { path: q, .. } if q == path));
+        self.undo
+            .retain(|u| !matches!(u, Undo::Op { path: q, .. } if q == path));
         ops.push(Op::Crop(r));
         self.saver.submit(path.to_path_buf(), ops);
-        let cut = Rect::from_min_max(uv.lerp_inside(Vec2::new(r[0], r[1])), uv.lerp_inside(Vec2::new(r[2], r[3])));
-        self.snaps.insert(path.to_path_buf(), Snap { tex, uv: cut, px: ops::dims(px[0], px[1], &[Op::Crop(r)]), from: sel, t0: now });
+        let cut = Rect::from_min_max(
+            uv.lerp_inside(Vec2::new(r[0], r[1])),
+            uv.lerp_inside(Vec2::new(r[2], r[3])),
+        );
+        self.snaps.insert(
+            path.to_path_buf(),
+            Snap {
+                tex,
+                uv: cut,
+                px: ops::dims(px[0], px[1], &[Op::Crop(r)]),
+                from: sel,
+                t0: now,
+            },
+        );
         self.reset_view();
     }
 
@@ -970,7 +1172,11 @@ impl App {
             match d.res {
                 Ok(bytes) => self.saved(&d.path, bytes),
                 Err(e) => {
-                    let name = d.path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                    let name = d
+                        .path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     self.say(format!("Couldn't crop {name}: {e}"), WARN, 0.0);
                     self.drop_snap(&d.path);
                     self.loader.forget(&d.path);
@@ -980,7 +1186,10 @@ impl App {
                     let keep = d.ops.len().saturating_sub(1);
                     for &op in &d.ops[..keep] {
                         if self.add_op_now(&ctx, &d.path, op).is_ok() {
-                            self.undo.push(Undo::Op { path: d.path.clone(), op });
+                            self.undo.push(Undo::Op {
+                                path: d.path.clone(),
+                                op,
+                            });
                         }
                     }
                 }
@@ -1012,7 +1221,9 @@ impl App {
                 }
                 // Keep the clicked row under the pointer while the slot rows move.
                 let old = Self::ctx_of(lib, lv);
-                let r = render(&lib.tree, style, &old).row_of(id).map(|x| x as isize - self.view.scroll as isize);
+                let r = render(&lib.tree, style, &old)
+                    .row_of(id)
+                    .map(|x| x as isize - self.view.scroll as isize);
                 lib.active = id;
                 lib.cursor = 0;
                 let cx = Self::ctx_of(lib, lv);
@@ -1037,7 +1248,9 @@ impl App {
         if let Some(w) = self.s.panel_w {
             return w.clamp(g.cw * 24.0, (full.width() - g.cw * 24.0).max(g.cw * 24.0));
         }
-        let Some(lib) = self.lib.as_ref() else { return (g.cw * 36.0).min(full.width() * 0.5) };
+        let Some(lib) = self.lib.as_ref() else {
+            return (g.cw * 36.0).min(full.width() * 0.5);
+        };
         let f = render(&lib.tree, self.style(), &Self::ctx_of(lib, 0));
         let want = f.width() as f32 * g.cw + g.cw * 4.0;
         if self.hold_frames > 0 {
@@ -1057,9 +1270,15 @@ impl App {
         });
         match s.cls {
             Cls::Ink => s.node.map(TreeAct::Ink),
-            Cls::CatName(_) | Cls::Count | Cls::Sucker(None) | Cls::Cursor if line.kind == Kind::Beak && slot.is_some() => {
+            Cls::CatName(_) | Cls::Count | Cls::Sucker(None) | Cls::Cursor
+                if line.kind == Kind::Beak && slot.is_some() =>
+            {
                 let (c, node) = slot.unwrap();
-                if secondary { node.map(TreeAct::Browse) } else { Some(TreeAct::Throw(c)) }
+                if secondary {
+                    node.map(TreeAct::Browse)
+                } else {
+                    Some(TreeAct::Throw(c))
+                }
             }
             _ => s.node.map(TreeAct::Arm),
         }
@@ -1073,7 +1292,12 @@ impl App {
             _ => None,
         })?;
         let mut b = a;
-        while b + 1 < line.spans.len() && matches!(line.spans[b + 1].cls, Cls::Count | Cls::Sucker(None) | Cls::Cursor) {
+        while b + 1 < line.spans.len()
+            && matches!(
+                line.spans[b + 1].cls,
+                Cls::Count | Cls::Sucker(None) | Cls::Cursor
+            )
+        {
             b += 1;
         }
         Some((a, b, c))
@@ -1086,7 +1310,10 @@ impl App {
         // Rows start below the menu bar's band and end above the status
         // line's, so the bars never sit on the root row when they appear.
         let (pad_t, pad_b) = (g.rh * 0.4, g.rh * 0.5);
-        let inner = Rect::from_min_max(Pos2::new(x0 + g.cw * 1.5, rect.top() + pad_t), Pos2::new(rect.right() - g.cw, rect.bottom() - pad_b));
+        let inner = Rect::from_min_max(
+            Pos2::new(x0 + g.cw * 1.5, rect.top() + pad_t),
+            Pos2::new(rect.right() - g.cw, rect.bottom() - pad_b),
+        );
         // The tree reshapes to the width it has instead of running off it;
         // the tide reflows to the same width, so clicks land where they show.
         let cols = (inner.width() / g.cw).floor().max(8.0) as usize;
@@ -1124,14 +1351,19 @@ impl App {
         }
         self.tree_dx = (self.tree_dx + resp.drag_delta().x).clamp(-slack, 0.0);
         let inner = inner.translate(Vec2::new(self.tree_dx, 0.0));
-        self.motion.step(&lib.tree, &frame, self.view.scroll, rows, now);
+        self.motion
+            .step(&lib.tree, &frame, self.view.scroll, rows, now);
         if !self.motion.settled {
             ctx.request_repaint();
         }
 
         let p = ui.painter().with_clip_rect(rect);
         p.rect_filled(rect, 0.0, PANEL);
-        let view = Rect::from_min_max(Pos2::new(rect.left(), inner.top()), Pos2::new(rect.right(), inner.top() + rows as f32 * g.rh)).intersect(rect);
+        let view = Rect::from_min_max(
+            Pos2::new(rect.left(), inner.top()),
+            Pos2::new(rect.right(), inner.top() + rows as f32 * g.rh),
+        )
+        .intersect(rect);
         let pv = p.with_clip_rect(view);
         let drawn = self.motion.visible(&frame, rows);
         let y_of = |y: f32| inner.top() + y * g.rh;
@@ -1140,14 +1372,28 @@ impl App {
             if !view.contains(q) {
                 return None;
             }
-            let d = drawn.iter().filter(|d| d.idx.is_some() && d.a > 0.5).find(|d| q.y >= y_of(d.y) && q.y < y_of(d.y) + g.rh)?;
+            let d = drawn
+                .iter()
+                .filter(|d| d.idx.is_some() && d.a > 0.5)
+                .find(|d| q.y >= y_of(d.y) && q.y < y_of(d.y) + g.rh)?;
             let i = d.idx?;
-            let si = run_at(&frame.lines[i].spans, |s| s.text.chars().count(), g.col(inner.left(), q.x))?;
+            let si = run_at(
+                &frame.lines[i].spans,
+                |s| s.text.chars().count(),
+                g.col(inner.left(), q.x),
+            )?;
             Some((i, si))
         };
-        let hover_line = resp.hover_pos().filter(|q| view.contains(*q)).and_then(|q| {
-            drawn.iter().filter(|d| d.idx.is_some() && d.a > 0.5).find(|d| q.y >= y_of(d.y) && q.y < y_of(d.y) + g.rh).and_then(|d| d.idx)
-        });
+        let hover_line = resp
+            .hover_pos()
+            .filter(|q| view.contains(*q))
+            .and_then(|q| {
+                drawn
+                    .iter()
+                    .filter(|d| d.idx.is_some() && d.a > 0.5)
+                    .find(|d| q.y >= y_of(d.y) && q.y < y_of(d.y) + g.rh)
+                    .and_then(|d| d.idx)
+            });
         let hover = resp.hover_pos().and_then(under);
         let target = hover.and_then(|(i, si)| Self::hit(&frame.lines[i], si, false));
         if target.is_some() {
@@ -1164,7 +1410,9 @@ impl App {
         if let Some(n) = over {
             let (lo, hi) = frame.span(&lib.tree, n);
             if lo <= hi {
-                let depth = std::iter::successors(lib.tree.nodes[n].parent, |&x| lib.tree.nodes[x].parent).count();
+                let depth =
+                    std::iter::successors(lib.tree.nodes[n].parent, |&x| lib.tree.nodes[x].parent)
+                        .count();
                 let c = rgb(colour(&lib.tree, Cls::Trunk(depth)).0);
                 let t = self.motion.pos(frame.lines[lo].key).unwrap_or(lo as f32);
                 let b = self.motion.pos(frame.lines[hi].key).unwrap_or(hi as f32) + 1.0;
@@ -1177,9 +1425,19 @@ impl App {
         {
             let t = ctx.animate_value_with_time(Id::new("otf-band-t"), t, 0.1) - self.motion.scroll;
             let b = ctx.animate_value_with_time(Id::new("otf-band-b"), b, 0.1) - self.motion.scroll;
-            let band = Rect::from_min_max(Pos2::new(rect.left(), y_of(t)), Pos2::new(rect.right(), y_of(b)));
+            let band = Rect::from_min_max(
+                Pos2::new(rect.left(), y_of(t)),
+                Pos2::new(rect.right(), y_of(b)),
+            );
             pv.rect_filled(band, 0.0, c.gamma_multiply(0.07 * a_band));
-            pv.rect_filled(Rect::from_min_max(band.min + Vec2::new(1.0, 1.0), Pos2::new(band.left() + 3.0, band.bottom() - 1.0)), 1.0, c.gamma_multiply(0.85 * a_band));
+            pv.rect_filled(
+                Rect::from_min_max(
+                    band.min + Vec2::new(1.0, 1.0),
+                    Pos2::new(band.left() + 3.0, band.bottom() - 1.0),
+                ),
+                1.0,
+                c.gamma_multiply(0.85 * a_band),
+            );
         }
 
         for d in &drawn {
@@ -1198,25 +1456,48 @@ impl App {
                 && !line.heads.contains(&0)
                 && now - t0 < 0.4
             {
-                pv.rect_filled(row, 0.0, RUST.gamma_multiply(0.35 * (1.0 - ((now - t0) / 0.4) as f32)));
+                pv.rect_filled(
+                    row,
+                    0.0,
+                    RUST.gamma_multiply(0.35 * (1.0 - ((now - t0) / 0.4) as f32)),
+                );
                 ctx.request_repaint();
             }
             let hot = hover.filter(|(h, _)| Some(*h) == i).map(|(_, si)| si);
             // A slot under the pointer becomes a keycap in its own colour.
             let slot = match (hot, target) {
-                (Some(si), Some(TreeAct::Throw(_) | TreeAct::Browse(_))) => Self::slot_runs(line, si),
+                (Some(si), Some(TreeAct::Throw(_) | TreeAct::Browse(_))) => {
+                    Self::slot_runs(line, si)
+                }
                 _ => None,
             };
-            let x_at = |j: usize| inner.left() + line.spans[..j].iter().map(|s| s.text.chars().count()).sum::<usize>() as f32 * g.cw;
+            let x_at = |j: usize| {
+                inner.left()
+                    + line.spans[..j]
+                        .iter()
+                        .map(|s| s.text.chars().count())
+                        .sum::<usize>() as f32
+                        * g.cw
+            };
             if let Some((a, b, c)) = slot {
-                let r = Rect::from_min_max(Pos2::new(x_at(a) - 2.0, y + 1.0), Pos2::new(x_at(b + 1) + 2.0, y + g.rh - 1.0));
+                let r = Rect::from_min_max(
+                    Pos2::new(x_at(a) - 2.0, y + 1.0),
+                    Pos2::new(x_at(b + 1) + 2.0, y + g.rh - 1.0),
+                );
                 pv.rect_filled(r, 3.0, rgb(lib.tree.cats[c].cid).gamma_multiply(d.a));
             }
             if let (Some(_), Some(TreeAct::Ink(_))) = (hot, target) {
                 for (j, s) in line.spans.iter().enumerate() {
                     if s.cls == Cls::Ink {
-                        let r = Rect::from_min_max(Pos2::new(x_at(j) - 2.0, y + 1.0), Pos2::new(x_at(j + 1) + 2.0, y + g.rh - 1.0));
-                        pv.rect_filled(r, 3.0, rgb(colour(&lib.tree, Cls::Ink).0).gamma_multiply(0.25 * d.a));
+                        let r = Rect::from_min_max(
+                            Pos2::new(x_at(j) - 2.0, y + 1.0),
+                            Pos2::new(x_at(j + 1) + 2.0, y + g.rh - 1.0),
+                        );
+                        pv.rect_filled(
+                            r,
+                            3.0,
+                            rgb(colour(&lib.tree, Cls::Ink).0).gamma_multiply(0.25 * d.a),
+                        );
                     }
                 }
             }
@@ -1236,7 +1517,11 @@ impl App {
                     && now - f.t0 < 0.8
                 {
                     let k = 1.0 - ((now - f.t0) / 0.8) as f32;
-                    pv.rect_filled(Rect::from_min_size(Pos2::new(x - 1.0, y), Vec2::new(w + 2.0, g.rh)), 0.0, col.gamma_multiply(k));
+                    pv.rect_filled(
+                        Rect::from_min_size(Pos2::new(x - 1.0, y), Vec2::new(w + 2.0, g.rh)),
+                        0.0,
+                        col.gamma_multiply(k),
+                    );
                     if k > 0.45 {
                         col = STAGE;
                     }
@@ -1254,25 +1539,52 @@ impl App {
                 if matches!(s.cls, Cls::BeakTrunk(_)) {
                     // Thicken the single horizontal rule by one physical
                     // pixel without changing the CP437 cell or hit width.
-                    g.text(&pv, Pos2::new(x, y + 1.0 / ctx.pixels_per_point()), &s.text, col, d.a);
+                    g.text(
+                        &pv,
+                        Pos2::new(x, y + 1.0 / ctx.pixels_per_point()),
+                        &s.text,
+                        col,
+                        d.a,
+                    );
                 }
                 x += w;
             }
             g.line(&pv, Pos2::new(inner.left(), y), &runs, d.a);
             if let Some((x0, x1, c)) = under_line {
                 let uy = (y + g.rh - 2.0).round() + 0.5;
-                pv.line_segment([Pos2::new(x0, uy), Pos2::new(x1, uy)], Stroke::new(1.0, c.gamma_multiply(0.8 * d.a)));
+                pv.line_segment(
+                    [Pos2::new(x0, uy), Pos2::new(x1, uy)],
+                    Stroke::new(1.0, c.gamma_multiply(0.8 * d.a)),
+                );
             }
         }
         let above = self.view.scroll;
         let below = frame.lines.len().saturating_sub(self.view.scroll + rows);
         if above > 0 {
             let t = format!("▲ {above}");
-            g.text(&p, Pos2::new(rect.right() - (t.chars().count() as f32 + 2.0) * g.cw, rect.top() + g.rh * 0.2), &t, DIM, 1.0);
+            g.text(
+                &p,
+                Pos2::new(
+                    rect.right() - (t.chars().count() as f32 + 2.0) * g.cw,
+                    rect.top() + g.rh * 0.2,
+                ),
+                &t,
+                DIM,
+                1.0,
+            );
         }
         if below > 0 {
             let t = format!("▼ {below}");
-            g.text(&p, Pos2::new(rect.right() - (t.chars().count() as f32 + 2.0) * g.cw, rect.bottom() - g.rh * 1.2), &t, DIM, 1.0);
+            g.text(
+                &p,
+                Pos2::new(
+                    rect.right() - (t.chars().count() as f32 + 2.0) * g.cw,
+                    rect.bottom() - g.rh * 1.2,
+                ),
+                &t,
+                DIM,
+                1.0,
+            );
         }
 
         let mut act = None;
@@ -1299,8 +1611,17 @@ impl App {
         let p = ui.painter().with_clip_rect(rect);
         let Some(f) = node.files.get(lib.cursor) else {
             let first = format!("No images in {}", node.name);
-            let hint = if self.s.tree { "Pick another folder in the tree" } else { "Press Tab to open the tree" };
-            theme::card(&p, g, rect.center(), &[(first.as_str(), TEXT), (hint, MUTED)]);
+            let hint = if self.s.tree {
+                "Pick another folder in the tree"
+            } else {
+                "Press Tab to open the tree"
+            };
+            theme::card(
+                &p,
+                g,
+                rect.center(),
+                &[(first.as_str(), TEXT), (hint, MUTED)],
+            );
             return;
         };
         let name = f.name.clone();
@@ -1314,23 +1635,51 @@ impl App {
         // cut waiting on its decode, then the decode.
         let live = self.snap_live(&path).map(|s| (s.tex.clone(), s.uv, s.px));
         let (tex, uv, orig) = match (self.pending.get(&path), live, self.loader.get(&path)) {
-            (Some(pd), _, _) => (pd.tex.clone(), full_uv, ops::dims(pd.full[0], pd.full[1], &pd.ops)),
+            (Some(pd), _, _) => (
+                pd.tex.clone(),
+                full_uv,
+                ops::dims(pd.full[0], pd.full[1], &pd.ops),
+            ),
             (None, Some(s), _) => s,
             (None, None, Some(Slot::Ready { tex, size, .. })) => (tex.clone(), full_uv, *size),
             (None, None, Some(Slot::Failed(e))) => {
                 let e = e.clone();
-                theme::card(&p, g, rect.center(), &[(name.as_str(), TEXT), ("Can't decode this file", WARN), (e.as_str(), MUTED)]);
+                theme::card(
+                    &p,
+                    g,
+                    rect.center(),
+                    &[
+                        (name.as_str(), TEXT),
+                        ("Can't decode this file", WARN),
+                        (e.as_str(), MUTED),
+                    ],
+                );
                 self.img_rect = Some(Rect::from_center_size(rect.center(), g.size(24, 5)));
                 return;
             }
             (None, None, None) if is_decodable(&name) => {
                 let s = SPIN[((now * 8.0) as usize) % 4];
-                g.text(&p, rect.center() - Vec2::new(g.cw * 0.5, g.rh * 0.5), s, MUTED, 1.0);
+                g.text(
+                    &p,
+                    rect.center() - Vec2::new(g.cw * 0.5, g.rh * 0.5),
+                    s,
+                    MUTED,
+                    1.0,
+                );
                 ui.ctx().request_repaint();
                 return;
             }
             (None, None, None) => {
-                theme::card(&p, g, rect.center(), &[(name.as_str(), TEXT), ("No preview for this format", MUTED), ("It can still go in a category", MUTED)]);
+                theme::card(
+                    &p,
+                    g,
+                    rect.center(),
+                    &[
+                        (name.as_str(), TEXT),
+                        ("No preview for this format", MUTED),
+                        ("It can still go in a category", MUTED),
+                    ],
+                );
                 self.img_rect = Some(Rect::from_center_size(rect.center(), g.size(32, 5)));
                 return;
             }
@@ -1343,7 +1692,12 @@ impl App {
                 self.reset_view();
             }
             // With DANGER crop armed the left button cuts; the others pan.
-            let pans = if danger { resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) } else { resp.dragged() };
+            let pans = if danger {
+                resp.dragged_by(egui::PointerButton::Secondary)
+                    || resp.dragged_by(egui::PointerButton::Middle)
+            } else {
+                resp.dragged()
+            };
             if pans {
                 self.pan += resp.drag_delta();
                 ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -1382,7 +1736,12 @@ impl App {
             && (0.12..0.75).contains(&age)
         {
             let k = (age - 0.12) / 0.63;
-            p.rect_stroke(r.expand(2.0 + 6.0 * k), 2.0, Stroke::new(2.0 * (1.0 - k), WARN.gamma_multiply(1.0 - k)), StrokeKind::Outside);
+            p.rect_stroke(
+                r.expand(2.0 + 6.0 * k),
+                2.0,
+                Stroke::new(2.0 * (1.0 - k), WARN.gamma_multiply(1.0 - k)),
+                StrokeKind::Outside,
+            );
             ui.ctx().request_repaint();
         }
         // The image's cid, held in the app: a rule under the picture, or in
@@ -1393,7 +1752,10 @@ impl App {
             if focused {
                 p.rect_stroke(r, 0.0, Stroke::new(2.0, rgb(cat.cid)), StrokeKind::Inside);
             } else {
-                let bar = Rect::from_min_size(Pos2::new(r.left(), r.bottom() + 6.0), Vec2::new(r.width(), 3.0));
+                let bar = Rect::from_min_size(
+                    Pos2::new(r.left(), r.bottom() + 6.0),
+                    Vec2::new(r.width(), 3.0),
+                );
                 p.rect_filled(bar, 0.0, rgb(cat.cid));
             }
         }
@@ -1411,9 +1773,23 @@ impl App {
     /// DANGER crop on the stage: press, drag a box, let go. Shift keeps it
     /// square. The box is red because letting go writes the file.
     #[allow(clippy::too_many_arguments)]
-    fn danger_overlay(&mut self, ui: &egui::Ui, p: &egui::Painter, resp: &egui::Response, ir: Rect, px: [u32; 2], path: &Path, g: &Grid, now: f64) {
+    fn danger_overlay(
+        &mut self,
+        ui: &egui::Ui,
+        p: &egui::Painter,
+        resp: &egui::Response,
+        ir: Rect,
+        px: [u32; 2],
+        path: &Path,
+        g: &Grid,
+        now: f64,
+    ) {
         let ctx = ui.ctx().clone();
-        if resp.hovered() && resp.hover_pos().is_some_and(|q| ir.expand(12.0).contains(q)) {
+        if resp.hovered()
+            && resp
+                .hover_pos()
+                .is_some_and(|q| ir.expand(12.0).contains(q))
+        {
             ctx.set_cursor_icon(CursorIcon::Crosshair);
         }
         // Not while the last cut is still growing into place: the picture
@@ -1421,10 +1797,17 @@ impl App {
         let settling = self.snaps.get(path).is_some_and(|s| now - s.t0 < 0.2);
         if resp.drag_started_by(egui::PointerButton::Primary)
             && !settling
-            && let Some(o) = ctx.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+            && let Some(o) = ctx
+                .input(|i| i.pointer.press_origin())
+                .or(resp.interact_pointer_pos())
         {
             let a = o.clamp(ir.min, ir.max);
-            self.quick = Some(Quick { path: path.to_path_buf(), ir, a, b: a });
+            self.quick = Some(Quick {
+                path: path.to_path_buf(),
+                ir,
+                a,
+                b: a,
+            });
         }
         if let Some(a) = self.quick.as_ref().filter(|k| k.path == path).map(|k| k.a)
             && resp.dragged_by(egui::PointerButton::Primary)
@@ -1433,7 +1816,18 @@ impl App {
             let mut b = q.clamp(ir.min, ir.max);
             if ctx.input(|i| i.modifiers.shift) {
                 let d = q - a;
-                let room = Vec2::new(if d.x >= 0.0 { ir.right() - a.x } else { a.x - ir.left() }, if d.y >= 0.0 { ir.bottom() - a.y } else { a.y - ir.top() });
+                let room = Vec2::new(
+                    if d.x >= 0.0 {
+                        ir.right() - a.x
+                    } else {
+                        a.x - ir.left()
+                    },
+                    if d.y >= 0.0 {
+                        ir.bottom() - a.y
+                    } else {
+                        a.y - ir.top()
+                    },
+                );
                 let side = d.x.abs().min(d.y.abs()).min(room.x).min(room.y);
                 b = a + Vec2::new(side * d.x.signum(), side * d.y.signum());
             }
@@ -1455,34 +1849,77 @@ impl App {
             let s = Rect::from_two_pos(k.a, k.b);
             // Only onto the picture the box was drawn on, unmoved; and a
             // click or a twitch is not a crop.
-            let same = k.path == path && k.ir.min.distance(ir.min) < 0.5 && k.ir.max.distance(ir.max) < 0.5;
+            let same = k.path == path
+                && k.ir.min.distance(ir.min) < 0.5
+                && k.ir.max.distance(ir.max) < 0.5;
             if same && s.width() >= 6.0 && s.height() >= 6.0 {
                 self.quick_crop(path, norm(s), s, now);
             }
             return;
         }
-        let Some((a, b)) = self.quick.as_ref().filter(|k| k.path == path).map(|k| (k.a, k.b)) else {
+        let Some((a, b)) = self
+            .quick
+            .as_ref()
+            .filter(|k| k.path == path)
+            .map(|k| (k.a, k.b))
+        else {
             // Armed: a red hairline round the picture.
-            p.rect_stroke(ir.expand(1.0), 0.0, Stroke::new(1.0, WARN.gamma_multiply(0.6)), StrokeKind::Outside);
+            p.rect_stroke(
+                ir.expand(1.0),
+                0.0,
+                Stroke::new(1.0, WARN.gamma_multiply(0.6)),
+                StrokeKind::Outside,
+            );
             return;
         };
         let s = Rect::from_two_pos(a, b);
         let veil = Color32::from_black_alpha(160);
-        p.rect_filled(Rect::from_min_max(ir.min, Pos2::new(ir.right(), s.top())), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), s.bottom()), ir.max), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), s.top()), Pos2::new(s.left(), s.bottom())), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(s.right(), s.top()), Pos2::new(ir.right(), s.bottom())), 0.0, veil);
+        p.rect_filled(
+            Rect::from_min_max(ir.min, Pos2::new(ir.right(), s.top())),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(Pos2::new(ir.left(), s.bottom()), ir.max),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(ir.left(), s.top()),
+                Pos2::new(s.left(), s.bottom()),
+            ),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(s.right(), s.top()),
+                Pos2::new(ir.right(), s.bottom()),
+            ),
+            0.0,
+            veil,
+        );
         p.rect_stroke(s, 0.0, Stroke::new(1.5, WARN), StrokeKind::Outside);
         let l = 12.0_f32.min(s.width() / 3.0).min(s.height() / 3.0);
         let thick = Stroke::new(3.0, WARN);
-        for (cx, cy, sx, sy) in [(s.left(), s.top(), 1.0, 1.0), (s.right(), s.top(), -1.0, 1.0), (s.left(), s.bottom(), 1.0, -1.0), (s.right(), s.bottom(), -1.0, -1.0)] {
+        for (cx, cy, sx, sy) in [
+            (s.left(), s.top(), 1.0, 1.0),
+            (s.right(), s.top(), -1.0, 1.0),
+            (s.left(), s.bottom(), 1.0, -1.0),
+            (s.right(), s.bottom(), -1.0, -1.0),
+        ] {
             p.line_segment([Pos2::new(cx, cy), Pos2::new(cx + sx * l, cy)], thick);
             p.line_segment([Pos2::new(cx, cy), Pos2::new(cx, cy + sy * l)], thick);
         }
         let d = ops::dims(px[0], px[1], &[Op::Crop(norm(s))]);
         let label = format!(" {} x {} ", d[0], d[1]);
         let lp = Pos2::new(s.left(), (s.top() - g.rh - 4.0).max(ir.top()));
-        p.rect_filled(Rect::from_min_size(lp, g.size(label.chars().count(), 1)), 2.0, WARN);
+        p.rect_filled(
+            Rect::from_min_size(lp, g.size(label.chars().count(), 1)),
+            2.0,
+            WARN,
+        );
         g.text(p, lp, &label, STAGE, 1.0);
     }
 
@@ -1497,14 +1934,44 @@ impl App {
         let font = egui::FontId::monospace(size);
         let pos = Pos2::new(r.left() + size * 1.2, r.bottom() - size * 1.6);
         let pos = pos.max(r.min);
-        p.text(pos + Vec2::new(size * 0.08, size * 0.08), egui::Align2::LEFT_TOP, &text, font.clone(), Color32::from_black_alpha(170));
-        p.text(pos, egui::Align2::LEFT_TOP, &text, font, Color32::from_rgb(0xf2, 0xee, 0xe4));
+        p.text(
+            pos + Vec2::new(size * 0.08, size * 0.08),
+            egui::Align2::LEFT_TOP,
+            &text,
+            font.clone(),
+            Color32::from_black_alpha(170),
+        );
+        p.text(
+            pos,
+            egui::Align2::LEFT_TOP,
+            &text,
+            font,
+            Color32::from_rgb(0xf2, 0xee, 0xe4),
+        );
     }
 
-    fn crop_overlay(&mut self, ui: &egui::Ui, p: &egui::Painter, resp: &egui::Response, ir: Rect, px: [u32; 2], g: &Grid) {
+    fn crop_overlay(
+        &mut self,
+        ui: &egui::Ui,
+        p: &egui::Painter,
+        resp: &egui::Response,
+        ir: Rect,
+        px: [u32; 2],
+        g: &Grid,
+    ) {
         let Some(c) = self.crop.as_mut() else { return };
-        let to_screen = |n: [f32; 4]| Rect::from_min_max(ir.lerp_inside(Vec2::new(n[0], n[1])), ir.lerp_inside(Vec2::new(n[2], n[3])));
-        let to_norm = |q: Pos2| [((q.x - ir.left()) / ir.width()).clamp(0.0, 1.0), ((q.y - ir.top()) / ir.height()).clamp(0.0, 1.0)];
+        let to_screen = |n: [f32; 4]| {
+            Rect::from_min_max(
+                ir.lerp_inside(Vec2::new(n[0], n[1])),
+                ir.lerp_inside(Vec2::new(n[2], n[3])),
+            )
+        };
+        let to_norm = |q: Pos2| {
+            [
+                ((q.x - ir.left()) / ir.width()).clamp(0.0, 1.0),
+                ((q.y - ir.top()) / ir.height()).clamp(0.0, 1.0),
+            ]
+        };
         let ratio = match ASPECTS[c.aspect].1 {
             x if x < 0.0 => Some(px[0] as f32 / px[1] as f32),
             0.0 => None,
@@ -1540,7 +2007,11 @@ impl App {
             ui.ctx().set_cursor_icon(match hit(s, h) {
                 Grab::Move => CursorIcon::Move,
                 Grab::Edge(m) if m & 3 != 0 && m & 12 != 0 => {
-                    if (m & 1 != 0) == (m & 4 != 0) { CursorIcon::ResizeNwSe } else { CursorIcon::ResizeNeSw }
+                    if (m & 1 != 0) == (m & 4 != 0) {
+                        CursorIcon::ResizeNwSe
+                    } else {
+                        CursorIcon::ResizeNeSw
+                    }
                 }
                 Grab::Edge(m) if m & 3 != 0 => CursorIcon::ResizeHorizontal,
                 Grab::Edge(_) => CursorIcon::ResizeVertical,
@@ -1551,7 +2022,10 @@ impl App {
         // recognised a few points later: an edge grabbed at the picture's
         // border stays that edge.
         if resp.drag_started()
-            && let Some(q) = ui.ctx().input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+            && let Some(q) = ui
+                .ctx()
+                .input(|i| i.pointer.press_origin())
+                .or(resp.interact_pointer_pos())
         {
             c.grab = Some((hit(s, q), c.r, q));
         }
@@ -1593,7 +2067,8 @@ impl App {
                 // Hold the ratio in pixels: height follows width.
                 let w_px = (r[2] - r[0]) * px[0] as f32;
                 let mut h_n = w_px / a / px[1] as f32;
-                let from_bottom = matches!(grab, Grab::Edge(m) if m & 4 != 0) || (grab == Grab::New && ny < to_norm(q0)[1]);
+                let from_bottom = matches!(grab, Grab::Edge(m) if m & 4 != 0)
+                    || (grab == Grab::New && ny < to_norm(q0)[1]);
                 if from_bottom {
                     h_n = h_n.min(r[3]);
                     r[1] = r[3] - h_n;
@@ -1617,10 +2092,32 @@ impl App {
         // Dim outside, thirds inside, rust corners, pixel size above.
         let s = to_screen(c.r);
         let veil = Color32::from_black_alpha(165);
-        p.rect_filled(Rect::from_min_max(ir.min, Pos2::new(ir.right(), s.top())), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), s.bottom()), ir.max), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), s.top()), Pos2::new(s.left(), s.bottom())), 0.0, veil);
-        p.rect_filled(Rect::from_min_max(Pos2::new(s.right(), s.top()), Pos2::new(ir.right(), s.bottom())), 0.0, veil);
+        p.rect_filled(
+            Rect::from_min_max(ir.min, Pos2::new(ir.right(), s.top())),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(Pos2::new(ir.left(), s.bottom()), ir.max),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(ir.left(), s.top()),
+                Pos2::new(s.left(), s.bottom()),
+            ),
+            0.0,
+            veil,
+        );
+        p.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(s.right(), s.top()),
+                Pos2::new(ir.right(), s.bottom()),
+            ),
+            0.0,
+            veil,
+        );
         let thin = Stroke::new(1.0, Color32::from_white_alpha(55));
         for k in [1.0 / 3.0, 2.0 / 3.0] {
             let x = s.left() + s.width() * k;
@@ -1631,14 +2128,23 @@ impl App {
         p.rect_stroke(s, 0.0, Stroke::new(1.0, RUST_HI), StrokeKind::Outside);
         let l = 14.0_f32.min(s.width() / 3.0).min(s.height() / 3.0);
         let thick = Stroke::new(3.0, RUST_HI);
-        for (cx, cy, sx, sy) in [(s.left(), s.top(), 1.0, 1.0), (s.right(), s.top(), -1.0, 1.0), (s.left(), s.bottom(), 1.0, -1.0), (s.right(), s.bottom(), -1.0, -1.0)] {
+        for (cx, cy, sx, sy) in [
+            (s.left(), s.top(), 1.0, 1.0),
+            (s.right(), s.top(), -1.0, 1.0),
+            (s.left(), s.bottom(), 1.0, -1.0),
+            (s.right(), s.bottom(), -1.0, -1.0),
+        ] {
             p.line_segment([Pos2::new(cx, cy), Pos2::new(cx + sx * l, cy)], thick);
             p.line_segment([Pos2::new(cx, cy), Pos2::new(cx, cy + sy * l)], thick);
         }
         let d = ops::dims(px[0], px[1], &[Op::Crop(c.r)]);
         let label = format!(" {} x {} ", d[0], d[1]);
         let lp = Pos2::new(s.left(), (s.top() - g.rh - 4.0).max(ir.top()));
-        p.rect_filled(Rect::from_min_size(lp, g.size(label.chars().count(), 1)), 0.0, RUST);
+        p.rect_filled(
+            Rect::from_min_size(lp, g.size(label.chars().count(), 1)),
+            0.0,
+            RUST,
+        );
         g.text(p, lp, &label, STAGE, 1.0);
     }
 
@@ -1670,7 +2176,9 @@ impl App {
         let n = k.name();
         let mut ch = n.chars();
         match (ch.next(), ch.next()) {
-            (Some(c), None) if c.is_ascii_alphanumeric() => Some(c.to_ascii_lowercase().to_string()),
+            (Some(c), None) if c.is_ascii_alphanumeric() => {
+                Some(c.to_ascii_lowercase().to_string())
+            }
             _ => None,
         }
     }
@@ -1679,7 +2187,16 @@ impl App {
         let typing = self.typed || ctx.memory(|m| m.focused().is_some());
         let events = ctx.input(|i| i.events.clone());
         for ev in events {
-            let Event::Key { key, pressed: true, repeat, modifiers, .. } = ev else { continue };
+            let Event::Key {
+                key,
+                pressed: true,
+                repeat,
+                modifiers,
+                ..
+            } = ev
+            else {
+                continue;
+            };
             // The key popover takes the next key, whatever it is.
             if let Some(ke) = self.key_edit.as_mut() {
                 match key {
@@ -1689,10 +2206,14 @@ impl App {
                         self.key_edit = None;
                         self.set_key(c, None, now);
                     }
-                    _ if modifiers.command || modifiers.alt => ke.err = Some(("Plain keys only, no Ctrl or Alt".into(), now)),
+                    _ if modifiers.command || modifiers.alt => {
+                        ke.err = Some(("Plain keys only, no Ctrl or Alt".into(), now))
+                    }
                     _ => match Self::key_name(key) {
                         None => ke.err = Some(("Use a letter, a digit or space".into(), now)),
-                        Some(n) if RESERVED.contains(&n.as_str()) => ke.err = Some((format!("{n} belongs to the app"), now)),
+                        Some(n) if RESERVED.contains(&n.as_str()) => {
+                            ke.err = Some((format!("{n} belongs to the app"), now))
+                        }
                         Some(n) => {
                             let c = ke.cat;
                             self.key_edit = None;
@@ -1721,9 +2242,12 @@ impl App {
                     f.err = Some("Use a letter, a digit or space".into());
                     continue;
                 };
-                let taken = self.lib.as_ref().and_then(|l| {
-                    l.tree.cats.iter().enumerate().find(|(i, c)| Some(*i) != f.edit && c.key.as_deref() == Some(n.as_str()))
-                });
+                let taken =
+                    self.lib.as_ref().and_then(|l| {
+                        l.tree.cats.iter().enumerate().find(|(i, c)| {
+                            Some(*i) != f.edit && c.key.as_deref() == Some(n.as_str())
+                        })
+                    });
                 if RESERVED.contains(&n.as_str()) {
                     f.err = Some(format!("{n} is used by the app"));
                 } else if let Some((_, c)) = taken {
@@ -1748,7 +2272,11 @@ impl App {
                 self.quiet = true;
             }
             // Esc first lets go of a DANGER box, then disarms the tool.
-            if self.danger && key == Key::Escape && self.menu.is_none() && matches!(self.dialog, Dialog::None) {
+            if self.danger
+                && key == Key::Escape
+                && self.menu.is_none()
+                && matches!(self.dialog, Dialog::None)
+            {
                 if self.quick.take().is_none() {
                     self.danger = false;
                 }
@@ -1823,7 +2351,15 @@ impl App {
                 Key::Backspace => Some(Act::Undo),
                 Key::Delete => Some(Act::Trash),
                 _ if !repeat && !cmd && !modifiers.alt => Self::key_name(key).and_then(|n| {
-                    self.lib.as_ref().and_then(|l| l.tree.cats.iter().position(|c| c.key.as_deref() == Some(n.as_str()))).map(Act::Throw)
+                    self.lib
+                        .as_ref()
+                        .and_then(|l| {
+                            l.tree
+                                .cats
+                                .iter()
+                                .position(|c| c.key.as_deref() == Some(n.as_str()))
+                        })
+                        .map(Act::Throw)
                 }),
                 _ => None,
             };
@@ -1834,8 +2370,14 @@ impl App {
     }
 
     fn drops(&mut self, ctx: &egui::Context, now: f64) {
-        let dropped: Vec<PathBuf> =
-            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        });
         if dropped.is_empty() {
             return;
         }
@@ -1856,7 +2398,10 @@ impl App {
         let dir = lib.tree.dir(lib.active);
         let mut n = 0;
         for f in files {
-            let name = f.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = f
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if octo::tree::is_media(&name)
                 && let Ok(nm) = ops::copy_into(f, &dir)
             {
@@ -1876,8 +2421,20 @@ impl App {
         }
         match a {
             Act::Menu(m) => self.menu = if self.menu == Some(m) { None } else { Some(m) },
-            Act::Settings => self.dialog = if matches!(self.dialog, Dialog::Settings) { Dialog::None } else { Dialog::Settings },
-            Act::Help => self.dialog = if matches!(self.dialog, Dialog::Help) { Dialog::None } else { Dialog::Help },
+            Act::Settings => {
+                self.dialog = if matches!(self.dialog, Dialog::Settings) {
+                    Dialog::None
+                } else {
+                    Dialog::Settings
+                }
+            }
+            Act::Help => {
+                self.dialog = if matches!(self.dialog, Dialog::Help) {
+                    Dialog::None
+                } else {
+                    Dialog::Help
+                }
+            }
             Act::Close => {
                 self.next_library = None;
                 self.dialog = match self.dialog {
@@ -1886,13 +2443,20 @@ impl App {
                 }
             }
             Act::Open => {
-                if let Some(d) = rfd::FileDialog::new().set_title("Open folder").pick_folder() {
+                if let Some(d) = rfd::FileDialog::new()
+                    .set_title("Open folder")
+                    .pick_folder()
+                {
                     self.request_library(d, None, now);
                 }
             }
             Act::ImportImages => {
                 let ex: Vec<&str> = IMAGES.iter().chain(OTHER_MEDIA).copied().collect();
-                if let Some(fs) = rfd::FileDialog::new().set_title("Import images").add_filter("Images and video", &ex).pick_files() {
+                if let Some(fs) = rfd::FileDialog::new()
+                    .set_title("Import images")
+                    .add_filter("Images and video", &ex)
+                    .pick_files()
+                {
                     self.import_files(&fs, now);
                 }
             }
@@ -1909,7 +2473,8 @@ impl App {
                 self.settle(true);
                 if let Some(p) = self.current() {
                     self.pending.remove(&p);
-                    self.undo.retain(|u| !matches!(u, Undo::Op { path, .. } if *path == p));
+                    self.undo
+                        .retain(|u| !matches!(u, Undo::Op { path, .. } if *path == p));
                     self.redo.clear();
                 }
             }
@@ -1928,7 +2493,9 @@ impl App {
             Act::Trash => self.trash(now),
             // Tree and image fold in turn; one of them always stays.
             Act::Tree => {
-                if self.s.dock.docked_count() == 0 { return; }
+                if self.s.dock.docked_count() == 0 {
+                    return;
+                }
                 if self.s.image {
                     self.s.tree = !self.s.tree;
                 } else {
@@ -1937,11 +2504,15 @@ impl App {
                 }
             }
             Act::RecallTrees => {
-                if self.s.dock.toggle_pair() { self.s.tree = true; }
+                if self.s.dock.toggle_pair() {
+                    self.s.tree = true;
+                }
             }
             Act::Widget(w) => self.toggle_widget(w),
             Act::Image => {
-                if self.s.dock.docked_count() == 0 { return; }
+                if self.s.dock.docked_count() == 0 {
+                    return;
+                }
                 if self.s.tree {
                     self.s.image = !self.s.image;
                 } else {
@@ -1956,27 +2527,69 @@ impl App {
                     self.pan = Vec2::ZERO;
                 }
             }
-            Act::Style(fwd) => self.s.style = if fwd { (self.s.style + 1) % 3 } else { (self.s.style + 2) % 3 },
+            Act::Style(fwd) => {
+                self.s.style = if fwd {
+                    (self.s.style + 1) % 3
+                } else {
+                    (self.s.style + 2) % 3
+                }
+            }
             Act::Pin => self.s.pin_ui = !self.s.pin_ui,
             Act::Title => self.s.title = !self.s.title,
-            Act::Font(fwd) => self.s.font = if fwd { (self.s.font + 1) % 12 } else { (self.s.font + 11) % 12 },
+            Act::Font(fwd) => {
+                self.s.font = if fwd {
+                    (self.s.font + 1) % 12
+                } else {
+                    (self.s.font + 11) % 12
+                }
+            }
             Act::Size(fwd) => {
                 let n = SIZES.len();
-                self.s.size = if fwd { (self.s.size + 1) % n } else { (self.s.size + n - 1) % n };
+                self.s.size = if fwd {
+                    (self.s.size + 1) % n
+                } else {
+                    (self.s.size + n - 1) % n
+                };
                 self.hold_frames = 3;
             }
             Act::EditCat(i) => {
                 if let Some(c) = self.lib.as_ref().and_then(|l| l.tree.cats.get(i)).cloned() {
-                    self.dialog =
-                        Dialog::Form(Form { edit: Some(i), name: c.name, key: c.key, cid: hexs(c.cid), tier: c.tier, capturing: false, err: None });
+                    self.dialog = Dialog::Form(Form {
+                        edit: Some(i),
+                        name: c.name,
+                        key: c.key,
+                        cid: hexs(c.cid),
+                        tier: c.tier,
+                        capturing: false,
+                        err: None,
+                    });
                 }
             }
             Act::NewCat => {
-                let used: Vec<String> =
-                    self.lib.as_ref().map(|l| l.tree.cats.iter().map(|c| hexs(c.cid).to_lowercase()).collect()).unwrap_or_default();
-                let cid = SWATCHES.iter().find(|s| !used.contains(&s.to_lowercase())).unwrap_or(&SWATCHES[0]);
-                self.dialog =
-                    Dialog::Form(Form { edit: None, name: String::new(), key: None, cid: cid.to_string(), tier: 'c', capturing: false, err: None });
+                let used: Vec<String> = self
+                    .lib
+                    .as_ref()
+                    .map(|l| {
+                        l.tree
+                            .cats
+                            .iter()
+                            .map(|c| hexs(c.cid).to_lowercase())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let cid = SWATCHES
+                    .iter()
+                    .find(|s| !used.contains(&s.to_lowercase()))
+                    .unwrap_or(&SWATCHES[0]);
+                self.dialog = Dialog::Form(Form {
+                    edit: None,
+                    name: String::new(),
+                    key: None,
+                    cid: cid.to_string(),
+                    tier: 'c',
+                    capturing: false,
+                    err: None,
+                });
             }
             Act::FormKey => {
                 if let Dialog::Form(f) = &mut self.dialog {
@@ -1992,14 +2605,21 @@ impl App {
             Act::Swatch(fwd) => {
                 if let Dialog::Form(f) = &mut self.dialog {
                     let n = SWATCHES.len();
-                    let i = SWATCHES.iter().position(|s| s.eq_ignore_ascii_case(&f.cid)).unwrap_or(0);
+                    let i = SWATCHES
+                        .iter()
+                        .position(|s| s.eq_ignore_ascii_case(&f.cid))
+                        .unwrap_or(0);
                     f.cid = SWATCHES[if fwd { (i + 1) % n } else { (i + n - 1) % n }].to_string();
                 }
             }
             Act::Tier(fwd) => {
                 if let Dialog::Form(f) = &mut self.dialog {
                     let t = f.tier as u8;
-                    f.tier = if fwd { t.saturating_add(1).min(b'z') as char } else { t.saturating_sub(1).max(b'a') as char };
+                    f.tier = if fwd {
+                        t.saturating_add(1).min(b'z') as char
+                    } else {
+                        t.saturating_sub(1).max(b'a') as char
+                    };
                 }
             }
             Act::FormSave => self.save_form(),
@@ -2031,7 +2651,11 @@ impl App {
                 let px = self.current_px();
                 if let Some(c) = self.crop.as_mut() {
                     let n = ASPECTS.len();
-                    c.aspect = if fwd { (c.aspect + 1) % n } else { (c.aspect + n - 1) % n };
+                    c.aspect = if fwd {
+                        (c.aspect + 1) % n
+                    } else {
+                        (c.aspect + n - 1) % n
+                    };
                     c.r = [0.0, 0.0, 1.0, 1.0];
                     let a = ASPECTS[c.aspect].1;
                     if let Some(px) = px
@@ -2073,11 +2697,15 @@ impl App {
             }
             // In image focus the maximize button and F11 step through the
             // focus sizes instead.
-            Act::Window(Ctl::Maximize) | Act::Fullscreen if self.focus.active() => self.focus.cycle(ctx, now),
+            Act::Window(Ctl::Maximize) | Act::Fullscreen if self.focus.active() => {
+                self.focus.cycle(ctx, now)
+            }
             Act::Window(c) => window::apply(ctx, c),
             Act::Fullscreen => window::toggle_fullscreen(ctx),
         }
-        if matches!(a, Act::Undo | Act::Redo | Act::ImportImages) { self.files.refresh_open(); }
+        if matches!(a, Act::Undo | Act::Redo | Act::ImportImages) {
+            self.files.refresh_open();
+        }
     }
 
     /// Give category `cat` the key `k` (None unbinds it). A key another
@@ -2090,11 +2718,18 @@ impl App {
         }
         let mut note = None;
         if let Some(k) = &k
-            && let Some(j) = lib.tree.cats.iter().position(|c| c.key.as_deref() == Some(k.as_str()))
+            && let Some(j) = lib
+                .tree
+                .cats
+                .iter()
+                .position(|c| c.key.as_deref() == Some(k.as_str()))
             && j != cat
         {
             lib.tree.cats[j].key = old.clone();
-            let (a, b) = (lib.tree.cats[cat].name.clone(), lib.tree.cats[j].name.clone());
+            let (a, b) = (
+                lib.tree.cats[cat].name.clone(),
+                lib.tree.cats[j].name.clone(),
+            );
             note = Some(match &old {
                 Some(o) => format!("{a} took {k}; {b} has {o} now"),
                 None => format!("{a} took {k}; {b} has no key now"),
@@ -2102,7 +2737,11 @@ impl App {
         }
         lib.tree.cats[cat].key = k;
         match config::save(&lib.tree.root, &lib.tree.cats) {
-            Err(e) => self.say(format!("Kept for this session; couldn't write .calamari: {e}"), WARN, now),
+            Err(e) => self.say(
+                format!("Kept for this session; couldn't write .calamari: {e}"),
+                WARN,
+                now,
+            ),
             Ok(()) => {
                 if let Some(n) = note {
                     self.say(n, MUTED, now);
@@ -2113,8 +2752,15 @@ impl App {
 
     fn import_categories(&mut self, now: f64) {
         let Some(lib) = self.lib.as_mut() else { return };
-        let Some(f) = rfd::FileDialog::new().set_title("Import categories").pick_file() else { return };
-        let cats = std::fs::read_to_string(&f).map(|t| config::parse(&t)).unwrap_or_default();
+        let Some(f) = rfd::FileDialog::new()
+            .set_title("Import categories")
+            .pick_file()
+        else {
+            return;
+        };
+        let cats = std::fs::read_to_string(&f)
+            .map(|t| config::parse(&t))
+            .unwrap_or_default();
         if cats.is_empty() {
             self.say("That file has no categories in it", WARN, now);
             return;
@@ -2134,15 +2780,24 @@ impl App {
             Act::Manifest => rfd::FileDialog::new()
                 .set_file_name("calamari_manifest.csv")
                 .save_file()
-                .map(|p| std::fs::write(&p, ops::manifest(&lib.tree)).map(|_| format!("Exported manifest to {}", p.display()))),
+                .map(|p| {
+                    std::fs::write(&p, ops::manifest(&lib.tree))
+                        .map(|_| format!("Exported manifest to {}", p.display()))
+                }),
             Act::ExportCats => rfd::FileDialog::new()
                 .set_file_name("categories.calamari")
                 .save_file()
-                .map(|p| std::fs::write(&p, config::to_text(&lib.tree.cats)).map(|_| format!("Exported categories to {}", p.display()))),
+                .map(|p| {
+                    std::fs::write(&p, config::to_text(&lib.tree.cats))
+                        .map(|_| format!("Exported categories to {}", p.display()))
+                }),
             _ => rfd::FileDialog::new()
                 .set_title("Export categorised images")
                 .pick_folder()
-                .map(|d| ops::export_set(&lib.tree, &d).map(|n| format!("Copied {n} categorised images to {}", d.display()))),
+                .map(|d| {
+                    ops::export_set(&lib.tree, &d)
+                        .map(|n| format!("Copied {n} categorised images to {}", d.display()))
+                }),
         };
         match r {
             Some(Ok(m)) => self.say(m, MUTED, now),
@@ -2152,9 +2807,13 @@ impl App {
     }
 
     fn save_form(&mut self) {
-        let Dialog::Form(f) = &mut self.dialog else { return };
+        let Dialog::Form(f) = &mut self.dialog else {
+            return;
+        };
         let name = f.name.trim().to_string();
-        if name.is_empty() || name.contains(|c: char| c.is_whitespace() || "/\\:*?\"<>|".contains(c)) {
+        if name.is_empty()
+            || name.contains(|c: char| c.is_whitespace() || "/\\:*?\"<>|".contains(c))
+        {
             f.err = Some("Name it like a folder, without spaces".into());
             return;
         }
@@ -2166,11 +2825,22 @@ impl App {
             f.err = Some("Open a folder first".into());
             return;
         };
-        if lib.tree.cats.iter().enumerate().any(|(i, c)| Some(i) != f.edit && c.name == name) {
+        if lib
+            .tree
+            .cats
+            .iter()
+            .enumerate()
+            .any(|(i, c)| Some(i) != f.edit && c.name == name)
+        {
             f.err = Some(format!("{name} already exists"));
             return;
         }
-        let cat = Cat { key: f.key.clone(), name, cid, tier: f.tier };
+        let cat = Cat {
+            key: f.key.clone(),
+            name,
+            cid,
+            tier: f.tier,
+        };
         match f.edit {
             Some(i) => lib.tree.cats[i] = cat,
             None => lib.tree.cats.push(cat),
@@ -2178,7 +2848,9 @@ impl App {
         lib.tree.recat();
         self.motion.reset();
         if let Err(e) = config::save(&lib.tree.root, &lib.tree.cats) {
-            f.err = Some(format!("Kept for this session; couldn't write .calamari: {e}"));
+            f.err = Some(format!(
+                "Kept for this session; couldn't write .calamari: {e}"
+            ));
             return;
         }
         self.dialog = Dialog::Settings;
@@ -2205,7 +2877,11 @@ impl App {
             ("File", Act::Menu(Menu::File), self.menu == Some(Menu::File)),
             ("Edit", Act::Menu(Menu::Edit), self.menu == Some(Menu::Edit)),
             ("View", Act::Menu(Menu::View), self.menu == Some(Menu::View)),
-            ("Settings", Act::Settings, matches!(self.dialog, Dialog::Settings | Dialog::Form(_))),
+            (
+                "Settings",
+                Act::Settings,
+                matches!(self.dialog, Dialog::Settings | Dialog::Form(_)),
+            ),
             ("Help", Act::Help, matches!(self.dialog, Dialog::Help)),
         ];
         let mut right: Vec<Run> = Vec::new();
@@ -2218,7 +2894,14 @@ impl App {
         }
         let ctl_w = (h * 1.6).round();
         let room = full.width() - ctl_w * 3.0 - g.cw * 2.0;
-        let cols = |logo: usize, n: usize| (1 + logo + titles[..n].iter().map(|t| t.0.chars().count() + 2).sum::<usize>()) as f32 * g.cw;
+        let cols = |logo: usize, n: usize| {
+            (1 + logo
+                + titles[..n]
+                    .iter()
+                    .map(|t| t.0.chars().count() + 2)
+                    .sum::<usize>()) as f32
+                * g.cw
+        };
         let logo = if cols(20, 5) <= room { 20 } else { 3 };
         let mut shown = 5;
         while shown > 3 && cols(logo, shown) > room {
@@ -2233,16 +2916,23 @@ impl App {
         } else {
             window::max_glyph(ctx)
         };
-        let live = !self.yielding || self.s.pin_ui || self.menu.is_some() || !matches!(self.dialog, Dialog::None);
+        let live = !self.yielding
+            || self.s.pin_ui
+            || self.menu.is_some()
+            || !matches!(self.dialog, Dialog::None);
         Area::new(Id::new("menubar"))
             .fixed_pos(full.min - Vec2::new(0.0, slide))
             .order(Order::Foreground)
             .interactable(live && alpha > 0.05)
             .show(ctx, |ui| {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::CLICK | Sense::DRAG);
+                let (rect, resp) =
+                    ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::CLICK | Sense::DRAG);
                 let p = ui.painter();
                 p.rect_filled(rect, 0.0, IRON.gamma_multiply(alpha));
-                p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, EDGE.gamma_multiply(alpha)));
+                p.line_segment(
+                    [rect.left_bottom(), rect.right_bottom()],
+                    Stroke::new(1.0, EDGE.gamma_multiply(alpha)),
+                );
                 let (ctl, span) = window::controls(ui, rect, ctl_w, alpha, max_glyph);
                 if let Some(c) = ctl {
                     act = Some(Act::Window(c));
@@ -2251,7 +2941,12 @@ impl App {
                 let y = rect.top() + (h - g.rh) * 0.5;
                 let mut x = rect.left() + g.cw;
                 if logo == 20 {
-                    g.line(p, Pos2::new(x, y), &[("◙ ".into(), RUST_HI), ("Rusted Calamari".into(), TEXT)], alpha);
+                    g.line(
+                        p,
+                        Pos2::new(x, y),
+                        &[("◙ ".into(), RUST_HI), ("Rusted Calamari".into(), TEXT)],
+                        alpha,
+                    );
                 } else {
                     g.text(p, Pos2::new(x, y), "◙", RUST_HI, alpha);
                 }
@@ -2262,7 +2957,11 @@ impl App {
                     let cell = Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, h));
                     let hot = hover.is_some_and(|q| cell.contains(q));
                     if open || hot {
-                        p.rect_filled(cell, 0.0, (if open { RUST } else { IRON_HI }).gamma_multiply(alpha));
+                        p.rect_filled(
+                            cell,
+                            0.0,
+                            (if open { RUST } else { IRON_HI }).gamma_multiply(alpha),
+                        );
                     }
                     let first: String = t.chars().take(1).collect();
                     let rest: String = t.chars().skip(1).collect();
@@ -2273,40 +2972,66 @@ impl App {
                         (false, true) => RUST_HI,
                         (false, false) => TEXT,
                     };
-                    g.line(p, Pos2::new(x + g.cw, y), &[(first, lit), (rest, if open { STAGE } else { TEXT })], alpha);
+                    g.line(
+                        p,
+                        Pos2::new(x + g.cw, y),
+                        &[(first, lit), (rest, if open { STAGE } else { TEXT })],
+                        alpha,
+                    );
                     spots.push((x, x + w, a));
                     x += w;
                 }
                 let rw = Grid::cols(&right) as f32 * g.cw;
                 let rx = (span.left() - rw - g.cw * 2.0).max(x + g.cw * 3.0);
-                let clip = Rect::from_min_max(Pos2::new(x + g.cw, rect.top()), Pos2::new(span.left() - g.cw, rect.bottom()));
+                let clip = Rect::from_min_max(
+                    Pos2::new(x + g.cw, rect.top()),
+                    Pos2::new(span.left() - g.cw, rect.bottom()),
+                );
                 // The path only where it has room to say something.
                 if clip.width() > g.cw * 12.0 {
                     g.line(&p.with_clip_rect(clip), Pos2::new(rx, y), &right, alpha);
                 }
-                let on_spot = |q: Pos2| spots.iter().any(|(a, b, _)| q.x >= *a && q.x < *b) || span.contains(q);
+                let on_spot = |q: Pos2| {
+                    spots.iter().any(|(a, b, _)| q.x >= *a && q.x < *b) || span.contains(q)
+                };
                 if resp.clicked()
                     && let Some(q) = resp.interact_pointer_pos()
                     && !span.contains(q)
                 {
-                    act = act.or(spots.iter().find(|(a, b, _)| q.x >= *a && q.x < *b).map(|s| s.2));
+                    act = act.or(spots
+                        .iter()
+                        .find(|(a, b, _)| q.x >= *a && q.x < *b)
+                        .map(|s| s.2));
                 }
                 // The empty bar is the title bar.
                 if resp.drag_started_by(egui::PointerButton::Primary)
-                    && ctx.input(|i| i.pointer.press_origin()).is_some_and(|q| !on_spot(q))
+                    && ctx
+                        .input(|i| i.pointer.press_origin())
+                        .is_some_and(|q| !on_spot(q))
                 {
                     ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                 }
-                if resp.double_clicked() && resp.interact_pointer_pos().is_some_and(|q| !on_spot(q)) {
+                if resp.double_clicked() && resp.interact_pointer_pos().is_some_and(|q| !on_spot(q))
+                {
                     act = Some(Act::Window(Ctl::Maximize));
                 }
                 hovered = resp.contains_pointer();
             });
         self.chrome_hover |= hovered;
         if let Some(m) = self.menu {
-            let x = spots.iter().find(|s| s.2 == Act::Menu(m)).map_or(full.left(), |s| s.0);
+            let x = spots
+                .iter()
+                .find(|s| s.2 == Act::Menu(m))
+                .map_or(full.left(), |s| s.0);
             let items = self.menu_items(m);
-            let o = dropdown(ctx, g, "dropdown", Pos2::new(x, full.top() + h - slide), &items, alpha);
+            let o = dropdown(
+                ctx,
+                g,
+                "dropdown",
+                Pos2::new(x, full.top() + h - slide),
+                &items,
+                alpha,
+            );
             self.chrome_hover |= o.hovered;
             if o.click.is_some() {
                 return o.click;
@@ -2318,8 +3043,12 @@ impl App {
     /// The tool strip's tools. One entry per tool; the strip lays itself
     /// out from this list.
     fn tools(&self) -> Vec<Tool<Act>> {
-        let img = self.current().is_some_and(|p| is_decodable(&p.to_string_lossy()));
-        let write = self.current().is_some_and(|p| writable(&p.to_string_lossy()));
+        let img = self
+            .current()
+            .is_some_and(|p| is_decodable(&p.to_string_lossy()));
+        let write = self
+            .current()
+            .is_some_and(|p| writable(&p.to_string_lossy()));
         vec![
             Tool {
                 id: "crop",
@@ -2352,9 +3081,16 @@ impl App {
 
     fn menu_items(&self, m: Menu) -> Vec<Item<Act>> {
         let has_img = self.current().is_some();
-        let dirty = self.current().is_some_and(|p| self.pending.contains_key(&p));
+        let dirty = self
+            .current()
+            .is_some_and(|p| self.pending.contains_key(&p));
         let lib = self.lib.is_some();
-        let it = |label: &str, key: &str, act: Act, on: bool| Item::Act { label: label.into(), key: key.into(), act, on };
+        let it = |label: &str, key: &str, act: Act, on: bool| Item::Act {
+            label: label.into(),
+            key: key.into(),
+            act,
+            on,
+        };
         match m {
             Menu::File => vec![
                 it("Open folder...", "Ctrl+O", Act::Open, true),
@@ -2373,31 +3109,132 @@ impl App {
                 it("Quit", "Ctrl+Q", Act::Quit, true),
             ],
             Menu::Edit => vec![
-                it("Undo", "Ctrl+Z", Act::Undo, !self.undo.is_empty() || !self.saver.idle()),
+                it(
+                    "Undo",
+                    "Ctrl+Z",
+                    Act::Undo,
+                    !self.undo.is_empty() || !self.saver.idle(),
+                ),
                 it("Redo", "Ctrl+Shift+Z", Act::Redo, !self.redo.is_empty()),
                 Item::Rule,
                 it("Crop...", "Ctrl+K", Act::CropTool, has_img),
-                it(if self.danger { "DANGER crop: on" } else { "DANGER crop" }, "Ctrl+Shift+K", Act::Danger, has_img || self.danger),
+                it(
+                    if self.danger {
+                        "DANGER crop: on"
+                    } else {
+                        "DANGER crop"
+                    },
+                    "Ctrl+Shift+K",
+                    Act::Danger,
+                    has_img || self.danger,
+                ),
                 it("Rotate right", "Ctrl+R", Act::Edit(Op::RotCw), has_img),
-                it("Rotate left", "Ctrl+Shift+R", Act::Edit(Op::RotCcw), has_img),
+                it(
+                    "Rotate left",
+                    "Ctrl+Shift+R",
+                    Act::Edit(Op::RotCcw),
+                    has_img,
+                ),
                 it("Flip horizontal", "Ctrl+F", Act::Edit(Op::FlipH), has_img),
-                it("Flip vertical", "Ctrl+Shift+F", Act::Edit(Op::FlipV), has_img),
+                it(
+                    "Flip vertical",
+                    "Ctrl+Shift+F",
+                    Act::Edit(Op::FlipV),
+                    has_img,
+                ),
                 Item::Rule,
                 it("Move to trash", "Del", Act::Trash, has_img),
             ],
             Menu::View => vec![
-                it(if self.s.tree { "Fold the tree" } else { "Unfold the tree" }, "Tab", Act::Tree, self.s.dock.docked_count() > 0),
-                it(if self.s.image { "Fold the image" } else { "Unfold the image" }, "Shift+Tab", Act::Image, lib),
-                it(if self.s.dock.floating(Widget::Favourites) { "Dock Favourites" } else { "Detach Favourites" }, "", Act::Widget(Widget::Favourites), true),
-                it(if self.s.dock.floating(Widget::Files) { "Dock Files" } else { "Detach Files" }, "", Act::Widget(Widget::Files), true),
-                it(if self.s.dock.docked_count() == 0 { "Recall both trees" } else { "Restore detached trees" }, "3 clicks on fold tab", Act::RecallTrees, self.s.dock.pair_allowed()),
+                it(
+                    if self.s.tree {
+                        "Fold the tree"
+                    } else {
+                        "Unfold the tree"
+                    },
+                    "Tab",
+                    Act::Tree,
+                    self.s.dock.docked_count() > 0,
+                ),
+                it(
+                    if self.s.image {
+                        "Fold the image"
+                    } else {
+                        "Unfold the image"
+                    },
+                    "Shift+Tab",
+                    Act::Image,
+                    lib,
+                ),
+                it(
+                    if self.s.dock.floating(Widget::Favourites) {
+                        "Dock Favourites"
+                    } else {
+                        "Detach Favourites"
+                    },
+                    "",
+                    Act::Widget(Widget::Favourites),
+                    true,
+                ),
+                it(
+                    if self.s.dock.floating(Widget::Files) {
+                        "Dock Files"
+                    } else {
+                        "Detach Files"
+                    },
+                    "",
+                    Act::Widget(Widget::Files),
+                    true,
+                ),
+                it(
+                    if self.s.dock.docked_count() == 0 {
+                        "Recall both trees"
+                    } else {
+                        "Restore detached trees"
+                    },
+                    "3 clicks on fold tab",
+                    Act::RecallTrees,
+                    self.s.dock.pair_allowed(),
+                ),
                 it("Fit to window", "0", Act::Fit, has_img),
                 it("Actual size", "Ctrl+1", Act::Actual, has_img),
                 Item::Rule,
-                it(if self.s.title { "Hide the title" } else { "Show the title" }, "", Act::Title, has_img),
-                it(if self.s.toolbar { "Hide the toolbar" } else { "Show the toolbar" }, "", Act::Toolbar, true),
-                it(&format!("Tree style: {}", STYLE_NAMES[self.s.style % 3]), "", Act::Style(true), true),
-                it(if self.s.pin_ui { "Let the interface fade" } else { "Pin the interface" }, "", Act::Pin, true),
+                it(
+                    if self.s.title {
+                        "Hide the title"
+                    } else {
+                        "Show the title"
+                    },
+                    "",
+                    Act::Title,
+                    has_img,
+                ),
+                it(
+                    if self.s.toolbar {
+                        "Hide the toolbar"
+                    } else {
+                        "Show the toolbar"
+                    },
+                    "",
+                    Act::Toolbar,
+                    true,
+                ),
+                it(
+                    &format!("Tree style: {}", STYLE_NAMES[self.s.style % 3]),
+                    "",
+                    Act::Style(true),
+                    true,
+                ),
+                it(
+                    if self.s.pin_ui {
+                        "Let the interface fade"
+                    } else {
+                        "Pin the interface"
+                    },
+                    "",
+                    Act::Pin,
+                    true,
+                ),
                 Item::Rule,
                 it(
                     match (self.focus.active(), self.focus.stage, self.win_full) {
@@ -2429,7 +3266,10 @@ impl App {
         if let Some(f) = n.files.get(lib.cursor) {
             let path = lib.tree.dir(lib.active).join(&f.name);
             left.push(sep());
-            left.push(run(format!("{} of {}", lib.cursor + 1, n.files.len()), MUTED));
+            left.push(run(
+                format!("{} of {}", lib.cursor + 1, n.files.len()),
+                MUTED,
+            ));
             left.push(sep());
             left.push(run(f.name.clone(), TEXT));
             if let Some(px) = self.current_px() {
@@ -2441,19 +3281,37 @@ impl App {
                 left.push(run(format!("{:.1} MB", *bytes as f64 / 1_048_576.0), MUTED));
             }
             left.push(sep());
-            left.push(run(if (self.zoom - 1.0).abs() < 0.01 { "fit".to_string() } else { format!("{:.0}%", self.zoom * 100.0) }, MUTED));
+            left.push(run(
+                if (self.zoom - 1.0).abs() < 0.01 {
+                    "fit".to_string()
+                } else {
+                    format!("{:.0}%", self.zoom * 100.0)
+                },
+                MUTED,
+            ));
             if self.pending.contains_key(&path) {
                 left.push(sep());
                 left.push(run("edited, not saved", RUST_HI));
             }
         }
-        let cats: Vec<(usize, String, String, Color32)> =
-            lib.tree.cats.iter().enumerate().filter_map(|(i, c)| c.key.clone().map(|k| (i, k, c.name.clone(), rgb(c.cid)))).collect();
+        let cats: Vec<(usize, String, String, Color32)> = lib
+            .tree
+            .cats
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.key.clone().map(|k| (i, k, c.name.clone(), rgb(c.cid))))
+            .collect();
         // In a narrow window the chips drop their names and keep the keys.
         let named = |k: &str, nm: &str| (k.chars().count() + nm.chars().count() + 4) as f32 * g.cw;
         let full_w: f32 = cats.iter().map(|(_, k, nm, _)| named(k, nm) + g.cw).sum();
         let compact = full_w > full.width() * 0.55;
-        let chip_w = |k: &str, nm: &str| if compact { (k.chars().count() + 2) as f32 * g.cw } else { named(k, nm) };
+        let chip_w = |k: &str, nm: &str| {
+            if compact {
+                (k.chars().count() + 2) as f32 * g.cw
+            } else {
+                named(k, nm)
+            }
+        };
         let rw: f32 = cats.iter().map(|(_, k, nm, _)| chip_w(k, nm) + g.cw).sum();
         let y0 = full.bottom() - h;
         let start = full.right() - rw - g.cw;
@@ -2481,23 +3339,46 @@ impl App {
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(full.width(), h), Sense::CLICK);
                 let p = ui.painter();
                 p.rect_filled(rect, 0.0, IRON.gamma_multiply(alpha));
-                p.line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, EDGE.gamma_multiply(alpha)));
+                p.line_segment(
+                    [rect.left_top(), rect.right_top()],
+                    Stroke::new(1.0, EDGE.gamma_multiply(alpha)),
+                );
                 let y = rect.top() + (h - g.rh) * 0.5;
-                let clip = Rect::from_min_max(rect.min, Pos2::new(start - g.cw * 2.0, rect.bottom()));
-                g.line(&p.with_clip_rect(clip), Pos2::new(rect.left() + g.cw, y), &left, alpha);
+                let clip =
+                    Rect::from_min_max(rect.min, Pos2::new(start - g.cw * 2.0, rect.bottom()));
+                g.line(
+                    &p.with_clip_rect(clip),
+                    Pos2::new(rect.left() + g.cw, y),
+                    &left,
+                    alpha,
+                );
                 let hover = resp.hover_pos();
                 let mut x = start;
                 for (i, k, nm, c) in &cats {
                     let w = chip_w(k, nm);
-                    let cell = Rect::from_min_size(Pos2::new(x, rect.top() + 3.0), Vec2::new(w, h - 6.0));
+                    let cell =
+                        Rect::from_min_size(Pos2::new(x, rect.top() + 3.0), Vec2::new(w, h - 6.0));
                     let hot = hover.is_some_and(|q| cell.contains(q));
-                    p.rect_filled(cell, 2.0, (if hot { IRON_HI } else { STAGE }).gamma_multiply(alpha));
+                    p.rect_filled(
+                        cell,
+                        2.0,
+                        (if hot { IRON_HI } else { STAGE }).gamma_multiply(alpha),
+                    );
                     let kw = (k.chars().count() + 2) as f32 * g.cw;
-                    p.rect_filled(Rect::from_min_size(cell.min, Vec2::new(kw, cell.height())), 2.0, c.gamma_multiply(alpha));
+                    p.rect_filled(
+                        Rect::from_min_size(cell.min, Vec2::new(kw, cell.height())),
+                        2.0,
+                        c.gamma_multiply(alpha),
+                    );
                     if compact {
                         g.text(p, Pos2::new(x, y), &format!(" {k} "), STAGE, alpha);
                     } else {
-                        g.line(p, Pos2::new(x, y), &[(format!(" {k} "), STAGE), (format!(" {nm}"), *c)], alpha);
+                        g.line(
+                            p,
+                            Pos2::new(x, y),
+                            &[(format!(" {k} "), STAGE), (format!(" {nm}"), *c)],
+                            alpha,
+                        );
                     }
                     if resp.clicked()
                         && let Some(q) = resp.interact_pointer_pos()
@@ -2520,7 +3401,15 @@ impl App {
     /// band, so it arrives with the menu bar. `<` folds the tree away (image
     /// focus), `>` brings it back from the window's left edge; with the image
     /// folded it sits on the right edge and `<` brings the image back.
-    fn fold_tab(&mut self, ctx: &egui::Context, g: &Grid, r: Rect, glyph: &str, act_on: Act, alpha: f32) -> Option<Act> {
+    fn fold_tab(
+        &mut self,
+        ctx: &egui::Context,
+        g: &Grid,
+        r: Rect,
+        glyph: &str,
+        act_on: Act,
+        alpha: f32,
+    ) -> Option<Act> {
         if alpha < 0.01 {
             return None;
         }
@@ -2534,47 +3423,142 @@ impl App {
                 let p = ui.painter();
                 let hot = resp.hovered();
                 let h = ctx.animate_bool_with_time(Id::new("fold-tab-hot"), hot, 0.1);
-                let d = ctx.animate_bool_with_time(Id::new("fold-tab-down"), resp.is_pointer_button_down_on(), 0.05);
+                let d = ctx.animate_bool_with_time(
+                    Id::new("fold-tab-down"),
+                    resp.is_pointer_button_down_on(),
+                    0.05,
+                );
                 p.add(theme::shadow(alpha * 0.8).as_shape(rect, 4.0));
                 p.rect_filled(rect, 4.0, lerp_color(IRON, RUST, h).gamma_multiply(alpha));
-                p.rect_stroke(rect, 4.0, Stroke::new(1.0, EDGE.gamma_multiply(alpha * (1.0 - h))), StrokeKind::Inside);
+                p.rect_stroke(
+                    rect,
+                    4.0,
+                    Stroke::new(1.0, EDGE.gamma_multiply(alpha * (1.0 - h))),
+                    StrokeKind::Inside,
+                );
                 // The glyph leans the way the fold goes while hovered.
                 let lean = if glyph == "<" { -1.5 } else { 1.5 } * h * (1.0 - d);
-                g.text(p, rect.center() - Vec2::new(g.cw * 0.5 - lean, g.rh * 0.5 - d), glyph, lerp_color(RUST_HI, STAGE, h), alpha);
+                g.text(
+                    p,
+                    rect.center() - Vec2::new(g.cw * 0.5 - lean, g.rh * 0.5 - d),
+                    glyph,
+                    lerp_color(RUST_HI, STAGE, h),
+                    alpha,
+                );
                 if hot {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
                 if resp.clicked() {
-                    act = match self.fold_clicks.click(ctx.input(|i| i.time), self.s.dock.pair_allowed()) {
+                    act = match self
+                        .fold_clicks
+                        .click(ctx.input(|i| i.time), self.s.dock.pair_allowed())
+                    {
                         FoldGesture::Single => Some(act_on),
                         FoldGesture::Pair => Some(Act::RecallTrees),
                         FoldGesture::None => None,
                     };
-                    self.fold_action = if self.fold_clicks.pending() { Some(act_on) } else { None };
+                    self.fold_action = if self.fold_clicks.pending() {
+                        Some(act_on)
+                    } else {
+                        None
+                    };
                 }
                 self.chrome_hover |= resp.contains_pointer();
             });
         act
     }
 
-    fn settings_dialog(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
-        let cats: Vec<Cat> = self.lib.as_ref().map(|l| l.tree.cats.clone()).unwrap_or_else(config::defaults);
-        let active = self.lib.as_ref().map(|l| l.tree.path(l.active)).unwrap_or_else(|| "-".into());
+    fn settings_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        g: &Grid,
+        full: Rect,
+        alpha: f32,
+    ) -> Option<Act> {
+        let cats: Vec<Cat> = self
+            .lib
+            .as_ref()
+            .map(|l| l.tree.cats.clone())
+            .unwrap_or_else(config::defaults);
+        let active = self
+            .lib
+            .as_ref()
+            .map(|l| l.tree.path(l.active))
+            .unwrap_or_else(|| "-".into());
         let tick = |b: bool| if b { "[x]" } else { "[ ]" };
         let spin = |label: &str, value: String, prev: Act, next: Act| -> Row<Act> {
-            Row::new(vec![r(format!("├─ {label:<6} "), DIM), ra("◄", RUST_HI, prev), r(format!(" {value} "), TEXT), ra("►", RUST_HI, next)])
+            Row::new(vec![
+                r(format!("├─ {label:<6} "), DIM),
+                ra("◄", RUST_HI, prev),
+                r(format!(" {value} "), TEXT),
+                ra("►", RUST_HI, next),
+            ])
         };
         let mut rows: Vec<Row<Act>> = vec![
-            Row::new(vec![r("[settings]", RUST_HI), r(":style: ", DIM), r(format!("\"{}\"", STYLE_NAMES[self.s.style % 3]), TEXT)]),
-            Row::act(vec![r("├─ ", DIM), r(tick(self.s.pin_ui), RUST_HI), r(" PIN_UI: Turn Active UI Fade OFF", TEXT)], Act::Pin),
-            Row::act(vec![r("├─ ", DIM), r(tick(self.s.tree), RUST_HI), r(" Octobrachial Tree beside the image", TEXT), r("   Tab", DIM)], Act::Tree),
-            Row::act(vec![r("├─ ", DIM), r(tick(self.s.title), RUST_HI), r(" Title over the image", TEXT), r("   folder and number", DIM)], Act::Title),
-            Row::act(vec![r("├─ ", DIM), r(tick(self.s.toolbar), RUST_HI), r(" Toolbar at the top right", TEXT), r("   crop tools", DIM)], Act::Toolbar),
-            spin("font", FACES[self.s.font % 12].name.to_string(), Act::Font(false), Act::Font(true)),
-            spin("size", format!("{}", SIZES[self.s.size % SIZES.len()]), Act::Size(false), Act::Size(true)),
-            spin("style", STYLE_NAMES[self.s.style % 3].to_string(), Act::Style(false), Act::Style(true)),
+            Row::new(vec![
+                r("[settings]", RUST_HI),
+                r(":style: ", DIM),
+                r(format!("\"{}\"", STYLE_NAMES[self.s.style % 3]), TEXT),
+            ]),
+            Row::act(
+                vec![
+                    r("├─ ", DIM),
+                    r(tick(self.s.pin_ui), RUST_HI),
+                    r(" PIN_UI: Turn Active UI Fade OFF", TEXT),
+                ],
+                Act::Pin,
+            ),
+            Row::act(
+                vec![
+                    r("├─ ", DIM),
+                    r(tick(self.s.tree), RUST_HI),
+                    r(" Octobrachial Tree beside the image", TEXT),
+                    r("   Tab", DIM),
+                ],
+                Act::Tree,
+            ),
+            Row::act(
+                vec![
+                    r("├─ ", DIM),
+                    r(tick(self.s.title), RUST_HI),
+                    r(" Title over the image", TEXT),
+                    r("   folder and number", DIM),
+                ],
+                Act::Title,
+            ),
+            Row::act(
+                vec![
+                    r("├─ ", DIM),
+                    r(tick(self.s.toolbar), RUST_HI),
+                    r(" Toolbar at the top right", TEXT),
+                    r("   crop tools", DIM),
+                ],
+                Act::Toolbar,
+            ),
+            spin(
+                "font",
+                FACES[self.s.font % 12].name.to_string(),
+                Act::Font(false),
+                Act::Font(true),
+            ),
+            spin(
+                "size",
+                format!("{}", SIZES[self.s.size % SIZES.len()]),
+                Act::Size(false),
+                Act::Size(true),
+            ),
+            spin(
+                "style",
+                STYLE_NAMES[self.s.style % 3].to_string(),
+                Act::Style(false),
+                Act::Style(true),
+            ),
             Row::new(vec![r("└─ ", DIM), r("[create]", RUST_HI)]),
-            Row::new(vec![r("   └─ ", DIM), r("[classification_category] ", TEXT), r(active, MUTED)]),
+            Row::new(vec![
+                r("   └─ ", DIM),
+                r("[classification_category] ", TEXT),
+                r(active, MUTED),
+            ]),
         ];
         for (i, c) in cats.iter().enumerate() {
             // The key as a keycap in its category's colour: click it to press
@@ -2583,7 +3567,10 @@ impl App {
             let editing = self.key_edit.as_ref().is_some_and(|k| k.cat == i);
             let (key, kw) = match (&c.key, editing) {
                 (_, true) => (chipa(" _ ", STAGE, RUST_HI, Act::KeyEdit(i)), 3),
-                (Some(k), false) => (chipa(format!(" {k} "), STAGE, rgb(c.cid), Act::KeyEdit(i)), k.chars().count() + 2),
+                (Some(k), false) => (
+                    chipa(format!(" {k} "), STAGE, rgb(c.cid), Act::KeyEdit(i)),
+                    k.chars().count() + 2,
+                ),
                 (None, false) => (chipa(" + ", MUTED, IRON_HI, Act::KeyEdit(i)), 3),
             };
             rows.push(Row::act(
@@ -2601,26 +3588,55 @@ impl App {
                 Act::EditCat(i),
             ));
         }
-        rows.push(Row::act(vec![r("      └─ ", DIM), r("+ category", RUST_HI)], Act::NewCat));
+        rows.push(Row::act(
+            vec![r("      └─ ", DIM), r("+ category", RUST_HI)],
+            Act::NewCat,
+        ));
         rows.push(Row::blank());
-        rows.push(Row::new(vec![r("Click a key or double-click a colour to change it.", DIM)]));
+        rows.push(Row::new(vec![r(
+            "Click a key or double-click a colour to change it.",
+            DIM,
+        )]));
         let size = theme::dialog_size(g, "Settings", &rows, 0);
         let pos = Pos2::new(full.center().x - size.x * 0.5, full.top() + g.rh * 3.0);
-        let o = dialog(ctx, g, "settings", pos, "Settings", &rows, 0, alpha, true, Act::Close, |_, _| {});
+        let o = dialog(
+            ctx,
+            g,
+            "settings",
+            pos,
+            "Settings",
+            &rows,
+            0,
+            alpha,
+            true,
+            Act::Close,
+            |_, _| {},
+        );
         self.chrome_hover |= o.hovered;
         let now = ctx.input(|x| x.time);
         if let Some((Act::CidEdit(i), at)) = o.double
             && let Some(c) = self.lib.as_ref().and_then(|l| l.tree.cats.get(i))
         {
             self.key_edit = None;
-            self.cid_edit = Some(CidEdit { cat: i, at, orig: c.cid, hex: hexs(c.cid), opened: now });
+            self.cid_edit = Some(CidEdit {
+                cat: i,
+                at,
+                orig: c.cid,
+                hex: hexs(c.cid),
+                opened: now,
+            });
         }
         if let (Some(Act::KeyEdit(i)), Some(at)) = (o.click, o.at) {
             self.close_cid(true);
             self.key_edit = match &self.key_edit {
                 // A second click on the same keycap puts it away.
                 Some(k) if k.cat == i => None,
-                _ if self.lib.is_some() => Some(KeyEdit { cat: i, at, opened: now, err: None }),
+                _ if self.lib.is_some() => Some(KeyEdit {
+                    cat: i,
+                    at,
+                    opened: now,
+                    err: None,
+                }),
                 _ => None,
             };
             return None;
@@ -2637,7 +3653,9 @@ impl App {
             self.key_edit = None;
             return;
         }
-        let (Some(ed), Some(lib)) = (self.key_edit.as_ref(), self.lib.as_ref()) else { return };
+        let (Some(ed), Some(lib)) = (self.key_edit.as_ref(), self.lib.as_ref()) else {
+            return;
+        };
         let Some(cat) = lib.tree.cats.get(ed.cat) else {
             self.key_edit = None;
             return;
@@ -2657,36 +3675,55 @@ impl App {
         // A refused key shakes the popover.
         let shake = ed.err.as_ref().map_or(0.0, |(_, t0)| {
             let age = (now - t0) as f32;
-            if age < 0.35 { (age * 60.0).sin() * 6.0 * (1.0 - age / 0.35) } else { 0.0 }
+            if age < 0.35 {
+                (age * 60.0).sin() * 6.0 * (1.0 - age / 0.35)
+            } else {
+                0.0
+            }
         });
         let pos = ed.at.left_bottom() + Vec2::new(-g.cw * 2.0 + shake, 6.0);
         let pulse = 0.5 + 0.5 * ((now - ed.opened) as f32 * 5.0).cos();
-        let area = Area::new(Id::new("key-edit")).fixed_pos(pos).order(Order::Tooltip).show(ctx, |ui| {
-            let (body, _) = ui.allocate_exact_size(size, Sense::CLICK | Sense::DRAG);
-            let p = ui.painter();
-            theme::frame(p, body, 1.0);
-            let o = body.min + Vec2::new(g.cw * 2.0, g.rh * 0.5);
-            g.line(p, o, &head, 1.0);
-            let cx = o.x + Grid::cols(&head) as f32 * g.cw;
-            let cell = Rect::from_min_size(Pos2::new(cx, o.y + 1.0), Vec2::new(cap.chars().count() as f32 * g.cw, g.rh - 2.0));
-            p.rect_filled(cell, 3.0, cid.gamma_multiply(0.45 + 0.55 * pulse));
-            p.rect_stroke(cell.expand(1.5), 4.0, Stroke::new(1.5, TEXT.gamma_multiply(pulse)), StrokeKind::Outside);
-            g.text(p, Pos2::new(cx, o.y), &cap, STAGE, 1.0);
-            g.line(p, Pos2::new(cell.right(), o.y), &tail, 1.0);
-            g.line(p, o + Vec2::new(0.0, g.rh), &foot, 1.0);
-        });
+        let area = Area::new(Id::new("key-edit"))
+            .fixed_pos(pos)
+            .order(Order::Tooltip)
+            .show(ctx, |ui| {
+                let (body, _) = ui.allocate_exact_size(size, Sense::CLICK | Sense::DRAG);
+                let p = ui.painter();
+                theme::frame(p, body, 1.0);
+                let o = body.min + Vec2::new(g.cw * 2.0, g.rh * 0.5);
+                g.line(p, o, &head, 1.0);
+                let cx = o.x + Grid::cols(&head) as f32 * g.cw;
+                let cell = Rect::from_min_size(
+                    Pos2::new(cx, o.y + 1.0),
+                    Vec2::new(cap.chars().count() as f32 * g.cw, g.rh - 2.0),
+                );
+                p.rect_filled(cell, 3.0, cid.gamma_multiply(0.45 + 0.55 * pulse));
+                p.rect_stroke(
+                    cell.expand(1.5),
+                    4.0,
+                    Stroke::new(1.5, TEXT.gamma_multiply(pulse)),
+                    StrokeKind::Outside,
+                );
+                g.text(p, Pos2::new(cx, o.y), &cap, STAGE, 1.0);
+                g.line(p, Pos2::new(cell.right(), o.y), &tail, 1.0);
+                g.line(p, o + Vec2::new(0.0, g.rh), &foot, 1.0);
+            });
         ctx.request_repaint();
         self.chrome_hover |= area.response.contains_pointer();
         let outside = ctx.input(|i| i.pointer.primary_clicked())
             && now > ed.opened
-            && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| area.response.rect.contains(p) || ed.at.contains(p));
+            && !ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| area.response.rect.contains(p) || ed.at.contains(p));
         if outside {
             self.key_edit = None;
         }
     }
 
     fn close_cid(&mut self, keep: bool) {
-        let Some(ed) = self.cid_edit.take() else { return };
+        let Some(ed) = self.cid_edit.take() else {
+            return;
+        };
         let Some(lib) = self.lib.as_mut() else { return };
         if let Some(c) = lib.tree.cats.get_mut(ed.cat) {
             if !keep {
@@ -2705,7 +3742,9 @@ impl App {
             self.close_cid(true);
             return;
         }
-        let (Some(ed), Some(lib)) = (self.cid_edit.as_mut(), self.lib.as_mut()) else { return };
+        let (Some(ed), Some(lib)) = (self.cid_edit.as_mut(), self.lib.as_mut()) else {
+            return;
+        };
         let Some(cat) = lib.tree.cats.get(ed.cat).cloned() else {
             self.cid_edit = None;
             return;
@@ -2714,10 +3753,19 @@ impl App {
         let (mut done, mut revert) = (false, false);
         let font = g.font.clone();
         let button = |ui: &mut egui::Ui, t: &str, col: Color32| {
-            let r = ui.add(egui::Label::new(egui::RichText::new(t).font(font.clone()).color(col)).sense(Sense::CLICK));
+            let r = ui.add(
+                egui::Label::new(egui::RichText::new(t).font(font.clone()).color(col))
+                    .sense(Sense::CLICK),
+            );
             if r.hovered() {
                 ui.painter().rect_filled(r.rect.expand(1.0), 3.0, RUST);
-                ui.painter().text(r.rect.left_top(), egui::Align2::LEFT_TOP, t, font.clone(), STAGE);
+                ui.painter().text(
+                    r.rect.left_top(),
+                    egui::Align2::LEFT_TOP,
+                    t,
+                    font.clone(),
+                    STAGE,
+                );
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
             r.clicked()
@@ -2735,10 +3783,18 @@ impl App {
                     .show(ui, |ui| {
                         ui.spacing_mut().slider_width = g.cw * 20.0;
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(format!("[{}]", cat.name)).font(font.clone()).color(c));
+                            ui.label(
+                                egui::RichText::new(format!("[{}]", cat.name))
+                                    .font(font.clone())
+                                    .color(c),
+                            );
                             ui.add_space(g.cw);
                             let te = ui.add(
-                                TextEdit::singleline(&mut ed.hex).font(font.clone()).text_color(TEXT).desired_width(g.cw * 8.0).background_color(STAGE),
+                                TextEdit::singleline(&mut ed.hex)
+                                    .font(font.clone())
+                                    .text_color(TEXT)
+                                    .desired_width(g.cw * 8.0)
+                                    .background_color(STAGE),
                             );
                             if te.changed()
                                 && let Some(h) = config::hex(&ed.hex)
@@ -2750,17 +3806,27 @@ impl App {
                             }
                         });
                         ui.add_space(8.0);
-                        if egui::widgets::color_picker::color_picker_color32(ui, &mut c, egui::widgets::color_picker::Alpha::Opaque) {
+                        if egui::widgets::color_picker::color_picker_color32(
+                            ui,
+                            &mut c,
+                            egui::widgets::color_picker::Alpha::Opaque,
+                        ) {
                             ed.hex = format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b());
                         }
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             for sw in SWATCHES {
                                 let sc = config::hex(sw).map_or(MUTED, rgb);
-                                let (r, resp) = ui.allocate_exact_size(Vec2::splat(g.rh * 0.9), Sense::CLICK);
+                                let (r, resp) =
+                                    ui.allocate_exact_size(Vec2::splat(g.rh * 0.9), Sense::CLICK);
                                 ui.painter().rect_filled(r, 3.0, sc);
                                 if resp.hovered() || sc == c {
-                                    ui.painter().rect_stroke(r, 3.0, Stroke::new(1.5, TEXT), StrokeKind::Outside);
+                                    ui.painter().rect_stroke(
+                                        r,
+                                        3.0,
+                                        Stroke::new(1.5, TEXT),
+                                        StrokeKind::Outside,
+                                    );
                                 }
                                 if resp.clicked() {
                                     c = sc;
@@ -2783,7 +3849,9 @@ impl App {
         self.chrome_hover |= area.response.contains_pointer();
         let outside = ctx.input(|i| i.pointer.primary_clicked())
             && now > ed.opened
-            && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| area.response.rect.contains(p));
+            && !ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| area.response.rect.contains(p));
         if revert {
             self.close_cid(false);
         } else if done || outside {
@@ -2791,10 +3859,22 @@ impl App {
         }
     }
 
-    fn form_dialog(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
-        let Dialog::Form(f) = &mut self.dialog else { return None };
+    fn form_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        g: &Grid,
+        full: Rect,
+        alpha: f32,
+    ) -> Option<Act> {
+        let Dialog::Form(f) = &mut self.dialog else {
+            return None;
+        };
         let cid = config::hex(&f.cid);
-        let title = if f.edit.is_some() { "Edit category" } else { "New category" };
+        let title = if f.edit.is_some() {
+            "Edit category"
+        } else {
+            "New category"
+        };
         let mut rows: Vec<Row<Act>> = vec![
             Row::new(vec![r("├─ name   ", DIM), r(" ".repeat(20), TEXT)]),
             Row::act(
@@ -2805,7 +3885,14 @@ impl App {
                         (Some(k), false) => chip(format!(" {k} "), STAGE, cid.map_or(MUTED, rgb)),
                         (None, false) => r(" - ", DIM),
                     },
-                    r(if f.capturing { "" } else { "   click, then press the key" }, DIM),
+                    r(
+                        if f.capturing {
+                            ""
+                        } else {
+                            "   click, then press the key"
+                        },
+                        DIM,
+                    ),
                 ],
                 Act::FormKey,
             ),
@@ -2826,51 +3913,117 @@ impl App {
             ]),
             Row::blank(),
         ];
-        let mut buttons = vec![r("└─ ", DIM), ra("[ Save ]", RUST_HI, Act::FormSave), r("  ", DIM)];
+        let mut buttons = vec![
+            r("└─ ", DIM),
+            ra("[ Save ]", RUST_HI, Act::FormSave),
+            r("  ", DIM),
+        ];
         if f.edit.is_some() {
             buttons.push(ra("[ Delete ]", WARN, Act::FormDelete));
             buttons.push(r("  ", DIM));
         }
         buttons.push(ra("[ Cancel ]", MUTED, Act::FormCancel));
         rows.push(Row::new(buttons));
-        rows.push(Row::new(vec![r(format!("   {}", f.err.clone().unwrap_or_default()), WARN)]));
+        rows.push(Row::new(vec![r(
+            format!("   {}", f.err.clone().unwrap_or_default()),
+            WARN,
+        )]));
         let size = theme::dialog_size(g, title, &rows, 44);
         let pos = Pos2::new(full.center().x - size.x * 0.5, full.top() + g.rh * 3.0);
         let font = g.font.clone();
         let (name_ref, cid_ref) = (&mut f.name, &mut f.cid);
-        let o = dialog(ctx, g, "form", pos, title, &rows, 44, alpha, true, Act::Close, |ui, o| {
-            let field = |row: usize, col: usize, w: usize| Rect::from_min_size(o + Vec2::new(col as f32 * g.cw, row as f32 * g.rh), g.size(w, 1));
-            theme::field_bg(ui.painter(), field(0, 10, 20));
-            theme::field_bg(ui.painter(), field(2, 10, 9));
-            ui.put(field(0, 10, 20), TextEdit::singleline(name_ref).font(font.clone()).text_color(TEXT).frame(egui::Frame::NONE).margin(Vec2::ZERO));
-            ui.put(field(2, 10, 9), TextEdit::singleline(cid_ref).font(font.clone()).text_color(TEXT).frame(egui::Frame::NONE).margin(Vec2::ZERO));
-        });
+        let o = dialog(
+            ctx,
+            g,
+            "form",
+            pos,
+            title,
+            &rows,
+            44,
+            alpha,
+            true,
+            Act::Close,
+            |ui, o| {
+                let field = |row: usize, col: usize, w: usize| {
+                    Rect::from_min_size(
+                        o + Vec2::new(col as f32 * g.cw, row as f32 * g.rh),
+                        g.size(w, 1),
+                    )
+                };
+                theme::field_bg(ui.painter(), field(0, 10, 20));
+                theme::field_bg(ui.painter(), field(2, 10, 9));
+                ui.put(
+                    field(0, 10, 20),
+                    TextEdit::singleline(name_ref)
+                        .font(font.clone())
+                        .text_color(TEXT)
+                        .frame(egui::Frame::NONE)
+                        .margin(Vec2::ZERO),
+                );
+                ui.put(
+                    field(2, 10, 9),
+                    TextEdit::singleline(cid_ref)
+                        .font(font.clone())
+                        .text_color(TEXT)
+                        .frame(egui::Frame::NONE)
+                        .margin(Vec2::ZERO),
+                );
+            },
+        );
         self.chrome_hover |= o.hovered;
         o.click
     }
 
-    fn help_dialog(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
-        let cats: Vec<Cat> = self.lib.as_ref().map(|l| l.tree.cats.clone()).unwrap_or_else(config::defaults);
+    fn help_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        g: &Grid,
+        full: Rect,
+        alpha: f32,
+    ) -> Option<Act> {
+        let cats: Vec<Cat> = self
+            .lib
+            .as_ref()
+            .map(|l| l.tree.cats.clone())
+            .unwrap_or_else(config::defaults);
         let mut rows: Vec<Row<Act>> = vec![Row::new(vec![r("Categories", RUST_HI)])];
         for c in &cats {
             if let Some(k) = &c.key {
-                rows.push(Row::new(vec![r(format!("  {k:<20}"), TEXT), r(format!("move the image to {}", c.name), rgb(c.cid))]));
+                rows.push(Row::new(vec![
+                    r(format!("  {k:<20}"), TEXT),
+                    r(format!("move the image to {}", c.name), rgb(c.cid)),
+                ]));
             }
         }
         let sec = |rows: &mut Vec<Row<Act>>, head: &str, items: &[(&str, &str)]| {
             rows.push(Row::blank());
             rows.push(Row::new(vec![r(head.to_string(), RUST_HI)]));
             for (k, d) in items {
-                rows.push(Row::new(vec![r(format!("  {k:<20}"), TEXT), r(d.to_string(), MUTED)]));
+                rows.push(Row::new(vec![
+                    r(format!("  {k:<20}"), TEXT),
+                    r(d.to_string(), MUTED),
+                ]));
             }
         };
-        sec(&mut rows, "Browse", &[("← →", "one back, one on"), ("↑ ↓", "five back, five on"), ("[ ]", "25 on, 25 back"), ("; '", "50 on, 50 back")]);
+        sec(
+            &mut rows,
+            "Browse",
+            &[
+                ("← →", "one back, one on"),
+                ("↑ ↓", "five back, five on"),
+                ("[ ]", "25 on, 25 back"),
+                ("; '", "50 on, 50 back"),
+            ],
+        );
         sec(
             &mut rows,
             "Edit",
             &[
                 ("Ctrl+K", "crop; Enter applies, A changes the ratio"),
-                ("Ctrl+Shift+K", "DANGER crop: drag a box, it crops and saves"),
+                (
+                    "Ctrl+Shift+K",
+                    "DANGER crop: drag a box, it crops and saves",
+                ),
                 ("Ctrl+R", "rotate right; with Shift, left"),
                 ("Ctrl+F", "flip; with Shift, vertical"),
                 ("Ctrl+S", "save edits into the file"),
@@ -2889,51 +4042,126 @@ impl App {
                 ("0", "fit to window"),
                 ("Ctrl+1", "actual size"),
                 ("F11", "full screen"),
-                ("top bar", "drag to move the window, double-click to maximize"),
+                (
+                    "top bar",
+                    "drag to move the window, double-click to maximize",
+                ),
                 (".", "settings"),
             ],
         );
         sec(
             &mut rows,
             "Tree",
-            &[("click a folder", "open it; again to fold"), ("click a slot", "move the image there"), ("right-click a slot", "browse what it holds")],
+            &[
+                ("click a folder", "open it; again to fold"),
+                ("click a slot", "move the image there"),
+                ("right-click a slot", "browse what it holds"),
+            ],
         );
-        sec(&mut rows, "Tree windows", &[
-            ("drag a header", "detach; drag back left to dock"),
-            ("Shift+click header", "dock / restore detached position"),
-            ("triple-click fold tab", "recall both detached trees; again restores"),
-            ("drag the horizontal rule", "resize the joined widgets"),
-        ]);
-        sec(&mut rows, "Files", &[
-            ("click a folder / file", "expand folder / preview media"),
-            ("double-click a folder", "browse it as the root"),
-            ("Ctrl+L / Alt+Up", "enter a path / parent folder"),
-            ("Alt+Left / Alt+Right", "back / forward"),
-            ("F5", "refresh the selected folder"),
-        ]);
+        sec(
+            &mut rows,
+            "Tree windows",
+            &[
+                ("drag a header", "detach; drag back left to dock"),
+                ("Shift+click header", "dock / restore detached position"),
+                (
+                    "triple-click fold tab",
+                    "recall both detached trees; again restores",
+                ),
+                ("drag the horizontal rule", "resize the joined widgets"),
+            ],
+        );
+        sec(
+            &mut rows,
+            "Files",
+            &[
+                ("click a folder / file", "expand folder / preview media"),
+                ("double-click a folder", "browse it as the root"),
+                ("Ctrl+L / Alt+Up", "enter a path / parent folder"),
+                ("Alt+Left / Alt+Right", "back / forward"),
+                ("F5", "refresh the selected folder"),
+            ],
+        );
         let size = theme::dialog_size(g, "Keys", &rows, 0);
-        let pos = Pos2::new(full.center().x - size.x * 0.5, (full.center().y - size.y * 0.5).max(full.top() + g.rh * 2.0));
-        let o = dialog(ctx, g, "help", pos, "Keys", &rows, 0, alpha, true, Act::Close, |_, _| {});
+        let pos = Pos2::new(
+            full.center().x - size.x * 0.5,
+            (full.center().y - size.y * 0.5).max(full.top() + g.rh * 2.0),
+        );
+        let o = dialog(
+            ctx,
+            g,
+            "help",
+            pos,
+            "Keys",
+            &rows,
+            0,
+            alpha,
+            true,
+            Act::Close,
+            |_, _| {},
+        );
         self.chrome_hover |= o.hovered;
         o.click
     }
 
-    fn unsaved_dialog(&mut self, ctx: &egui::Context, g: &Grid, full: Rect, alpha: f32) -> Option<Act> {
+    fn unsaved_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        g: &Grid,
+        full: Rect,
+        alpha: f32,
+    ) -> Option<Act> {
         let n = self.pending.len();
         let opening = self.next_library.is_some();
         let rows: Vec<Row<Act>> = vec![
-            Row::new(vec![r(format!("{n} image{} {} edits that aren't saved.", if n == 1 { "" } else { "s" }, if n == 1 { "has" } else { "have" }), TEXT)]),
+            Row::new(vec![r(
+                format!(
+                    "{n} image{} {} edits that aren't saved.",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "has" } else { "have" }
+                ),
+                TEXT,
+            )]),
             Row::blank(),
             Row::new(vec![
-                ra(if opening { "[ Save all and open ]" } else { "[ Save all and quit ]" }, RUST_HI, Act::SaveAllQuit),
+                ra(
+                    if opening {
+                        "[ Save all and open ]"
+                    } else {
+                        "[ Save all and quit ]"
+                    },
+                    RUST_HI,
+                    Act::SaveAllQuit,
+                ),
                 r("  ", DIM),
-                ra(if opening { "[ Open without saving ]" } else { "[ Quit without saving ]" }, WARN, Act::DiscardQuit),
+                ra(
+                    if opening {
+                        "[ Open without saving ]"
+                    } else {
+                        "[ Quit without saving ]"
+                    },
+                    WARN,
+                    Act::DiscardQuit,
+                ),
                 r("  ", DIM),
                 ra("[ Cancel ]", MUTED, Act::Close),
             ]),
         ];
         let size = theme::dialog_size(g, "Unsaved edits", &rows, 0);
-        dialog(ctx, g, "unsaved", full.center() - size * 0.5, "Unsaved edits", &rows, 0, alpha, true, Act::Close, |_, _| {}).click
+        dialog(
+            ctx,
+            g,
+            "unsaved",
+            full.center() - size * 0.5,
+            "Unsaved edits",
+            &rows,
+            0,
+            alpha,
+            true,
+            Act::Close,
+            |_, _| {},
+        )
+        .click
     }
 
     /// The crop tool's bar. It sits under the picture's middle, or over it
@@ -2957,21 +4185,48 @@ impl App {
             ra("[ Cancel ]", MUTED, Act::CropCancel),
         ])];
         let size = theme::dialog_size(g, "Crop", &rows, 0);
-        let below = Rect::from_min_size(Pos2::new(stage.center().x - size.x * 0.5, stage.bottom() - size.y - g.rh * 2.5), size);
+        let below = Rect::from_min_size(
+            Pos2::new(
+                stage.center().x - size.x * 0.5,
+                stage.bottom() - size.y - g.rh * 2.5,
+            ),
+            size,
+        );
         let above = Rect::from_min_size(Pos2::new(below.left(), stage.top() + g.rh * 2.5), size);
         let band = g.rh.max(16.0);
-        let frame = self.img_rect.map(|ir| Rect::from_min_max(ir.lerp_inside(Vec2::new(c.r[0], c.r[1])), ir.lerp_inside(Vec2::new(c.r[2], c.r[3]))));
+        let frame = self.img_rect.map(|ir| {
+            Rect::from_min_max(
+                ir.lerp_inside(Vec2::new(c.r[0], c.r[1])),
+                ir.lerp_inside(Vec2::new(c.r[2], c.r[3])),
+            )
+        });
         let crosses = |bar: Rect, y: f32| y > bar.top() - band && y < bar.bottom() + band;
         let at = match frame {
             Some(f) if crosses(below, f.bottom()) && !crosses(above, f.top()) => above,
             _ => below,
         };
         let near_edge = frame.is_some_and(|f| {
-            ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| f.expand(band).contains(p) && !f.shrink(band).contains(p))
+            ctx.input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| f.expand(band).contains(p) && !f.shrink(band).contains(p))
         });
         let live = c.grab.is_none() && !near_edge;
-        let alpha = ctx.animate_bool_with_time(Id::new("crop-bar"), live, 0.12).max(0.12);
-        dialog(ctx, g, "cropbar", at.min, "Crop", &rows, 0, alpha, live, Act::CropCancel, |_, _| {}).click
+        let alpha = ctx
+            .animate_bool_with_time(Id::new("crop-bar"), live, 0.12)
+            .max(0.12);
+        dialog(
+            ctx,
+            g,
+            "cropbar",
+            at.min,
+            "Crop",
+            &rows,
+            0,
+            alpha,
+            live,
+            Act::CropCancel,
+            |_, _| {},
+        )
+        .click
     }
 
     /// Room the open overlays need, read from where they were drawn. A
@@ -2988,7 +4243,10 @@ impl App {
             Dialog::Unsaved => Some("unsaved"),
             Dialog::None => None,
         };
-        for id in centred.into_iter().chain(self.crop.is_some().then_some("cropbar")) {
+        for id in centred
+            .into_iter()
+            .chain(self.crop.is_some().then_some("cropbar"))
+        {
             if let Some(r) = at(id) {
                 need = need.max(Vec2::new(r.width() + g.cw * 4.0, r.height() + g.rh * 6.0));
             }
@@ -2996,13 +4254,22 @@ impl App {
         if self.menu.is_some()
             && let Some(r) = at("dropdown")
         {
-            need = need.max(Vec2::new(r.right() - full.left() + g.cw, r.bottom() - full.top() + g.rh));
+            need = need.max(Vec2::new(
+                r.right() - full.left() + g.cw,
+                r.bottom() - full.top() + g.rh,
+            ));
         }
         let c = full.center().x;
-        for (on, id) in [(self.cid_edit.is_some(), "cid-edit"), (self.key_edit.is_some(), "key-edit")] {
+        for (on, id) in [
+            (self.cid_edit.is_some(), "cid-edit"),
+            (self.key_edit.is_some(), "key-edit"),
+        ] {
             if on && let Some(r) = at(id) {
                 let half = (r.right() - c).max(c - r.left());
-                need = need.max(Vec2::new(half * 2.0 + g.cw * 2.0, r.bottom() - full.top() + g.rh));
+                need = need.max(Vec2::new(
+                    half * 2.0 + g.cw * 2.0,
+                    r.bottom() - full.top() + g.rh,
+                ));
             }
         }
         need
@@ -3055,9 +4322,17 @@ impl eframe::App for App {
         }
         let now = ctx.input(|i| i.time);
 
+        #[cfg(feature = "workspace-smoke")]
+        self.smoke_capture(&ctx);
         self.files.poll();
-        if self.fold_clicks.poll(now) == FoldGesture::Single && let Some(a) = self.fold_action.take() { self.act(&ctx, a, now); }
-        if self.fold_clicks.pending() { ctx.request_repaint_after(std::time::Duration::from_millis(50)); }
+        if self.fold_clicks.poll(now) == FoldGesture::Single
+            && let Some(a) = self.fold_action.take()
+        {
+            self.act(&ctx, a, now);
+        }
+        if self.fold_clicks.pending() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
 
         // Closing waits for queued writes; with unsaved edits it asks first.
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -3073,16 +4348,27 @@ impl eframe::App for App {
         self.loader.poll(&ctx);
         self.settle(false);
         // A DANGER cut steps aside once the file's new decode is in.
-        let done: Vec<PathBuf> =
-            self.snaps.iter().filter(|(p, s)| now - s.t0 > 0.8 && self.snap_live(p).is_none()).map(|(p, _)| p.clone()).collect();
+        let done: Vec<PathBuf> = self
+            .snaps
+            .iter()
+            .filter(|(p, s)| now - s.t0 > 0.8 && self.snap_live(p).is_none())
+            .map(|(p, _)| p.clone())
+            .collect();
         for p in done {
             self.snaps.remove(&p);
         }
         self.win_full = window::state(&ctx).1;
-        if ctx.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| self.img_rect.is_some_and(|r| r.contains(p)))) {
+        if ctx.input(|i| {
+            i.pointer.primary_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| self.img_rect.is_some_and(|r| r.contains(p)))
+        }) {
             self.files.focused = false;
         }
-        if !self.s.dock.floating(Widget::Files) { self.files.keys(&ctx); }
+        if !self.s.dock.floating(Widget::Files) {
+            self.files.keys(&ctx);
+        }
         self.keys(&ctx, now);
         if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
             self.quiet = false;
@@ -3111,7 +4397,10 @@ impl eframe::App for App {
         let framing = self.quick.is_some() || self.crop.as_ref().is_some_and(|c| c.grab.is_some());
         self.yielding = crop_on && (on_pic || framing);
         let floating = awake && !self.yielding;
-        let bar_on = self.s.pin_ui || dialog_open || self.menu.is_some() || (floating && (near_top || (was_hover && !near_bottom)));
+        let bar_on = self.s.pin_ui
+            || dialog_open
+            || self.menu.is_some()
+            || (floating && (near_top || (was_hover && !near_bottom)));
         let status_on = self.s.pin_ui || (floating && near_bottom);
         let a_bar = ctx.animate_bool_with_time(Id::new("fade-bar"), bar_on, 0.16);
         let a_status = ctx.animate_bool_with_time(Id::new("fade-status"), status_on, 0.16);
@@ -3139,7 +4428,11 @@ impl eframe::App for App {
             // The menu bar's least: the logo, File Edit View, the window buttons.
             min: Vec2::new((g.cw * 24.0 + ctl_w * 3.0).max(320.0), 200.0),
         };
-        let work = if focus_on || self.focus.active() { focus::work_area(frame, &ctx) } else { None };
+        let work = if focus_on || self.focus.active() {
+            focus::work_area(frame, &ctx)
+        } else {
+            None
+        };
         self.focus.step(&ctx, focus_on, &want, work, now);
         let focused = self.focus.active();
 
@@ -3150,17 +4443,42 @@ impl eframe::App for App {
             (true, true) => open_w,
         };
         // In focus the window itself changes shape; the panel goes at once.
-        let pw = ctx.animate_value_with_time(Id::new("panel-w"), target, if focused { 0.0 } else { 0.22 });
+        let pw = ctx.animate_value_with_time(
+            Id::new("panel-w"),
+            target,
+            if focused { 0.0 } else { 0.22 },
+        );
         // The margin between tree and image opens and closes with either
         // fold; its centre line is the divider.
-        let open_frac = if open_w > 0.0 { (pw / open_w).clamp(0.0, 1.0) } else { 0.0 };
+        let open_frac = if open_w > 0.0 {
+            (pw / open_w).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let img_frac = ((full.width() - pw) / (g.cw * 6.0)).clamp(0.0, 1.0);
         let gutter = g.cw * 2.0 * open_frac * img_frac;
         let line_x = (full.left() + pw + gutter * 0.5).min(full.right() - 2.0);
-        let panel = Rect::from_min_max(Pos2::new(full.left(), top), Pos2::new(full.left() + pw, bottom));
-        let stage = Rect::from_min_max(Pos2::new((full.left() + pw + gutter).min(full.right()), top), Pos2::new(full.right(), bottom));
+        let panel = Rect::from_min_max(
+            Pos2::new(full.left(), top),
+            Pos2::new(full.left() + pw, bottom),
+        );
+        let stage = Rect::from_min_max(
+            Pos2::new((full.left() + pw + gutter).min(full.right()), top),
+            Pos2::new(full.right(), bottom),
+        );
         self.snap_zone = self.main_rect.map(|r| {
-            Rect::from_min_max(Pos2::new(r.left(), r.top() + top), Pos2::new(r.left() + if tree_on { pw.max(48.0) } else { (g.cw * 8.0).max(48.0) }, r.top() + bottom))
+            Rect::from_min_max(
+                Pos2::new(r.left(), r.top() + top),
+                Pos2::new(
+                    r.left()
+                        + if tree_on {
+                            pw.max(48.0)
+                        } else {
+                            (g.cw * 8.0).max(48.0)
+                        },
+                    r.top() + bottom,
+                ),
+            )
         });
 
         let mut acts: Vec<Act> = Vec::new();
@@ -3175,10 +4493,16 @@ impl eframe::App for App {
             let edge_r = full.right() - g.cw * 8.0;
             let split = pw > 1.0 && full.width() - pw > 1.0;
             let zone = if split || dragging {
-                Some(Rect::from_center_size(Pos2::new(line_x, panel.center().y), Vec2::new(g.cw * 1.4, panel.height())))
+                Some(Rect::from_center_size(
+                    Pos2::new(line_x, panel.center().y),
+                    Vec2::new(g.cw * 1.4, panel.height()),
+                ))
             } else if !img_on {
                 // Image folded: grab the window's right edge to pull it back.
-                Some(Rect::from_min_max(Pos2::new(full.right() - 14.0, top), Pos2::new(full.right() - 4.0, bottom)))
+                Some(Rect::from_min_max(
+                    Pos2::new(full.right() - 14.0, top),
+                    Pos2::new(full.right() - 4.0, bottom),
+                ))
             } else {
                 None
             };
@@ -3209,27 +4533,48 @@ impl eframe::App for App {
                     self.s.panel_w = None;
                     self.tree_hold = 0.0;
                 }
-                let fade = if split || dragging { open_frac.max(0.35) } else { a_hot };
+                let fade = if split || dragging {
+                    open_frac.max(0.35)
+                } else {
+                    a_hot
+                };
                 let col = lerp_color(EDGE.gamma_multiply(0.7), RUST_HI, a_hot).gamma_multiply(fade);
                 let p = ui.painter();
                 let y0 = top + g.rh * 0.75;
                 let y1 = bottom - g.rh * 0.75;
                 let lx = line_x.round() + 0.5;
-                p.line_segment([Pos2::new(lx, y0), Pos2::new(lx, y1)], Stroke::new(1.0 + a_hot, col));
+                p.line_segment(
+                    [Pos2::new(lx, y0), Pos2::new(lx, y1)],
+                    Stroke::new(1.0 + a_hot, col),
+                );
                 if a_hot > 0.01 {
                     // Grip: three dots where the pointer meets the rule.
-                    let gy = dr.hover_pos().or(dr.interact_pointer_pos()).map_or(panel.center().y, |h| h.y).clamp(y0 + 12.0, y1 - 12.0);
+                    let gy = dr
+                        .hover_pos()
+                        .or(dr.interact_pointer_pos())
+                        .map_or(panel.center().y, |h| h.y)
+                        .clamp(y0 + 12.0, y1 - 12.0);
                     for d in [-7.0, 0.0, 7.0] {
-                        p.circle_filled(Pos2::new(line_x, gy + d), 2.0, RUST_HI.gamma_multiply(a_hot));
+                        p.circle_filled(
+                            Pos2::new(line_x, gy + d),
+                            2.0,
+                            RUST_HI.gamma_multiply(a_hot),
+                        );
                     }
                 }
                 // Past either edge: the side that will fold dims, so the
                 // drag says what letting go will do.
                 if dragging && let Some(q) = ctx.input(|i| i.pointer.interact_pos()) {
                     let fold = if q.x < edge_l {
-                        Some(Rect::from_min_max(full.min, Pos2::new(full.left() + g.cw * 3.0, full.bottom())))
+                        Some(Rect::from_min_max(
+                            full.min,
+                            Pos2::new(full.left() + g.cw * 3.0, full.bottom()),
+                        ))
                     } else if q.x > edge_r {
-                        Some(Rect::from_min_max(Pos2::new(full.right() - g.cw * 3.0, full.top()), full.max))
+                        Some(Rect::from_min_max(
+                            Pos2::new(full.right() - g.cw * 3.0, full.top()),
+                            full.max,
+                        ))
                     } else {
                         None
                     };
@@ -3260,9 +4605,16 @@ impl eframe::App for App {
                 (true, true) => (line_x - size.x * 0.5, "<", Act::Tree),
             };
             let tab = Rect::from_min_size(Pos2::new(x.max(full.left() + 6.0), ty), size);
-            let near = ptr.is_some_and(|p| tab.expand2(Vec2::new(g.cw * 4.0, g.rh * 2.5)).contains(p) || (tree_on && img_on && (p.x - line_x).abs() < g.cw * 2.0));
+            let near = ptr.is_some_and(|p| {
+                tab.expand2(Vec2::new(g.cw * 4.0, g.rh * 2.5)).contains(p)
+                    || (tree_on && img_on && (p.x - line_x).abs() < g.cw * 2.0)
+            });
             // Never over an open window or menu.
-            let tab_on = !dialog_open && self.menu.is_none() && !dragging && !self.yielding && (self.s.pin_ui || bar_on || (awake && near));
+            let tab_on = !dialog_open
+                && self.menu.is_none()
+                && !dragging
+                && !self.yielding
+                && (self.s.pin_ui || bar_on || (awake && near));
             let a_tab = ctx.animate_bool_with_time(Id::new("fade-tab"), tab_on, 0.16);
             if let Some(a) = self.fold_tab(&ctx, &g, tab, glyph, act, a_tab) {
                 acts.push(a);
@@ -3290,7 +4642,12 @@ impl eframe::App for App {
         let tb_on = self.s.toolbar
             && self.lib.is_some()
             && !self.yielding
-            && (self.s.pin_ui || bar_on || engaged || just_on || self.tools_hover || (awake && near_tools));
+            && (self.s.pin_ui
+                || bar_on
+                || engaged
+                || just_on
+                || self.tools_hover
+                || (awake && near_tools));
         let a_tb = ctx.animate_bool_with_time(Id::new("fade-tools"), tb_on, 0.16);
         let tb = toolbar::show(&ctx, &g, anchor, room, &tools, a_tb, !self.yielding, now);
         self.tools_hover = tb.hovered;
@@ -3307,12 +4664,25 @@ impl eframe::App for App {
         for (i, f) in self.fly.iter().enumerate() {
             let t = ((now - f.t0) / 0.26).min(1.0) as f32;
             let e = t * t * (3.0 - 2.0 * t);
-            let target = self.chips.iter().find(|(c, _)| *c == f.cat).map_or(Pos2::new(full.center().x, full.bottom()), |c| c.1);
+            let target = self
+                .chips
+                .iter()
+                .find(|(c, _)| *c == f.cat)
+                .map_or(Pos2::new(full.center().x, full.bottom()), |c| c.1);
             let to = Rect::from_center_size(target, Vec2::new(g.cw * 3.0, g.rh));
             let r = Rect::from_min_max(f.from.min.lerp(to.min, e), f.from.max.lerp(to.max, e));
-            let cid = self.lib.as_ref().and_then(|l| l.tree.cats.get(f.cat)).map_or(RUST_HI, |c| rgb(c.cid));
+            let cid = self
+                .lib
+                .as_ref()
+                .and_then(|l| l.tree.cats.get(f.cat))
+                .map_or(RUST_HI, |c| rgb(c.cid));
             if let Some(tex) = &f.tex {
-                fp.image(tex.id(), r, f.uv, Color32::WHITE.gamma_multiply(1.0 - 0.6 * e));
+                fp.image(
+                    tex.id(),
+                    r,
+                    f.uv,
+                    Color32::WHITE.gamma_multiply(1.0 - 0.6 * e),
+                );
             }
             fp.rect_stroke(r, 0.0, Stroke::new(2.0, cid), StrokeKind::Inside);
             if t >= 1.0 {
@@ -3351,11 +4721,23 @@ impl eframe::App for App {
                 {
                     ty = ty.max(r.bottom() + g.rh * 0.6);
                 }
-                let pos = Pos2::new((full.right() - (w as f32 + 2.0) * g.cw).max(full.left() + g.cw), ty);
-                let box_r = Rect::from_min_size(pos, g.size(w, 1)).expand2(Vec2::new(0.0, g.rh * 0.4));
-                tp.rect_filled(box_r.translate(Vec2::new(3.0, 4.0)), 2.0, SHADOW.gamma_multiply(a));
+                let pos = Pos2::new(
+                    (full.right() - (w as f32 + 2.0) * g.cw).max(full.left() + g.cw),
+                    ty,
+                );
+                let box_r =
+                    Rect::from_min_size(pos, g.size(w, 1)).expand2(Vec2::new(0.0, g.rh * 0.4));
+                tp.rect_filled(
+                    box_r.translate(Vec2::new(3.0, 4.0)),
+                    2.0,
+                    SHADOW.gamma_multiply(a),
+                );
                 tp.rect_filled(box_r, 2.0, IRON.gamma_multiply(a));
-                tp.rect_filled(Rect::from_min_size(box_r.min, Vec2::new(3.0, box_r.height())), 0.0, c.gamma_multiply(a));
+                tp.rect_filled(
+                    Rect::from_min_size(box_r.min, Vec2::new(3.0, box_r.height())),
+                    0.0,
+                    c.gamma_multiply(a),
+                );
                 g.text(&tp, pos + Vec2::new(g.cw * 2.0, 0.0), &m, TEXT, a);
                 ctx.request_repaint();
             } else {
@@ -3410,7 +4792,11 @@ impl eframe::App for App {
         }
         window::hairline(&ctx, full);
         // A click anywhere else closes an open menu.
-        if self.menu.is_some() && ctx.input(|i| i.pointer.primary_clicked()) && !self.chrome_hover && acts.is_empty() {
+        if self.menu.is_some()
+            && ctx.input(|i| i.pointer.primary_clicked())
+            && !self.chrome_hover
+            && acts.is_empty()
+        {
             self.menu = None;
         }
         for a in acts {
@@ -3419,6 +4805,8 @@ impl eframe::App for App {
 
         self.floating_trees(&ctx, now);
         self.dock_preview(&ctx);
+        #[cfg(feature = "workspace-smoke")]
+        self.smoke_step(&ctx, now);
 
         self.typed = ctx.memory(|m| m.focused().is_some());
         self.want();
@@ -3447,8 +4835,17 @@ mod tests {
 
     #[test]
     fn verbatim_prefixes_come_off() {
-        assert_eq!(plain(PathBuf::from(r"\\?\C:\Users\ryanf\Desktop\ruth-image")), PathBuf::from(r"C:\Users\ryanf\Desktop\ruth-image"));
-        assert_eq!(plain(PathBuf::from(r"\\?\UNC\nas\photos")), PathBuf::from(r"\\nas\photos"));
-        assert_eq!(plain(PathBuf::from("/home/me/photos")), PathBuf::from("/home/me/photos"));
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\C:\Users\ryanf\Desktop\ruth-image")),
+            PathBuf::from(r"C:\Users\ryanf\Desktop\ruth-image")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\nas\photos")),
+            PathBuf::from(r"\\nas\photos")
+        );
+        assert_eq!(
+            plain(PathBuf::from("/home/me/photos")),
+            PathBuf::from("/home/me/photos")
+        );
     }
 }

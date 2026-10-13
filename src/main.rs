@@ -1,18 +1,21 @@
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 //! Rusted Calamari. `cargo run --release` opens the window; the last
 //! library reopens on its own. A folder path argument opens that instead.
 //! The window has no system frame: the interface's own top bar moves it,
 //! and its edges resize it (see `window`).
 
 mod app;
-mod dock;
 mod browserpane;
-mod theme;
+mod dock;
 mod focus;
 mod fonts;
 mod glyph;
 mod loader;
 mod saver;
+mod theme;
 mod toolbar;
 mod treeview;
 mod window;
@@ -32,5 +35,9 @@ fn main() -> eframe::Result {
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    eframe::run_native("Rusted Calamari", opts, Box::new(move |cc| Ok(Box::new(app::App::new(cc, arg)))))
+    eframe::run_native(
+        "Rusted Calamari",
+        opts,
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, arg)))),
+    )
 }

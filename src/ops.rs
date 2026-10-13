@@ -1,8 +1,8 @@
 //! Disk operations. Every one returns what undo needs.
 
+use crate::tree::Tree;
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
-use crate::tree::Tree;
 use std::fs;
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
@@ -53,7 +53,10 @@ pub fn move_into(src: &Path, dst_dir: &Path, name: &str) -> io::Result<String> {
 
 pub fn copy_into(src: &Path, dst_dir: &Path) -> io::Result<String> {
     fs::create_dir_all(dst_dir)?;
-    let name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = src
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let n = unique(dst_dir, &name);
     fs::copy(src, dst_dir.join(&n))?;
     Ok(n)
@@ -89,7 +92,12 @@ fn crop_px(w: u32, h: u32, r: [f32; 4]) -> (u32, u32, u32, u32) {
     let y1 = (r[3].clamp(0.0, 1.0) * h as f32).round() as u32;
     let x0 = x0.min(w.saturating_sub(1));
     let y0 = y0.min(h.saturating_sub(1));
-    (x0, y0, x1.saturating_sub(x0).max(1).min(w - x0), y1.saturating_sub(y0).max(1).min(h - y0))
+    (
+        x0,
+        y0,
+        x1.saturating_sub(x0).max(1).min(w - x0),
+        y1.saturating_sub(y0).max(1).min(h - y0),
+    )
 }
 
 pub fn apply(mut img: DynamicImage, ops: &[Op]) -> DynamicImage {
@@ -124,7 +132,9 @@ pub fn dims(mut w: u32, mut h: u32, ops: &[Op]) -> [u32; 2] {
 }
 
 fn ext_of(p: &Path) -> String {
-    p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
+    p.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 /// Encode for the format named by `path`'s extension. JPEG at quality 95.
@@ -139,8 +149,10 @@ pub fn encode(img: &DynamicImage, path: &Path) -> Result<Vec<u8>, String> {
             .write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP)
             .map_err(|e| e.to_string())?,
         _ => {
-            let fmt = ImageFormat::from_path(path).map_err(|_| format!("cannot write .{ext} files"))?;
-            img.write_to(&mut Cursor::new(&mut buf), fmt).map_err(|e| e.to_string())?
+            let fmt =
+                ImageFormat::from_path(path).map_err(|_| format!("cannot write .{ext} files"))?;
+            img.write_to(&mut Cursor::new(&mut buf), fmt)
+                .map_err(|e| e.to_string())?
         }
     }
     Ok(buf)
@@ -180,7 +192,11 @@ pub fn trash_dir(t: &Tree) -> PathBuf {
 }
 
 fn csv(s: &str) -> String {
-    if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() }
+    if s.contains([',', '"', '\n']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
 }
 
 /// Every media file with its category, tier and cid.
@@ -189,11 +205,19 @@ pub fn manifest(t: &Tree) -> String {
     for (i, n) in t.nodes.iter().enumerate() {
         let dir = t.path(i);
         for f in &n.files {
-            let rel = if dir == "." { f.name.clone() } else { format!("{dir}/{}", f.name) };
+            let rel = if dir == "." {
+                f.name.clone()
+            } else {
+                format!("{dir}/{}", f.name)
+            };
             let (cat, tier, cid) = match f.cat {
                 Some(c) => {
                     let c = &t.cats[c];
-                    (c.name.clone(), c.tier.to_string(), format!("#{:02X}{:02X}{:02X}", c.cid.0, c.cid.1, c.cid.2))
+                    (
+                        c.name.clone(),
+                        c.tier.to_string(),
+                        format!("#{:02X}{:02X}{:02X}", c.cid.0, c.cid.1, c.cid.2),
+                    )
                 }
                 None => (String::new(), String::new(), String::new()),
             };

@@ -32,7 +32,15 @@ impl Grid {
     pub fn line(&self, p: &Painter, pos: Pos2, runs: &[Run], alpha: f32) -> Rect {
         let mut job = LayoutJob::default();
         for (t, c) in runs {
-            job.append(t, 0.0, TextFormat { font_id: self.font.clone(), color: c.gamma_multiply(alpha), ..Default::default() });
+            job.append(
+                t,
+                0.0,
+                TextFormat {
+                    font_id: self.font.clone(),
+                    color: c.gamma_multiply(alpha),
+                    ..Default::default()
+                },
+            );
         }
         let g = p.layout_job(job);
         let r = Rect::from_min_size(pos, g.size());

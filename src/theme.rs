@@ -8,7 +8,9 @@
 //! interface never tints the photographs it frames.
 
 use crate::glyph::Grid;
-use eframe::egui::{self, Area, Color32, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use eframe::egui::{
+    self, Area, Color32, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
+};
 
 /// Stage behind the image: neutral, so colour judgement isn't skewed.
 pub const STAGE: Color32 = Color32::from_rgb(0x17, 0x18, 0x1a);
@@ -45,27 +47,57 @@ pub struct R<A> {
 }
 
 pub fn r<A>(t: impl Into<String>, c: Color32) -> R<A> {
-    R { t: t.into(), c, a: None, bg: None, dbl: None }
+    R {
+        t: t.into(),
+        c,
+        a: None,
+        bg: None,
+        dbl: None,
+    }
 }
 
 pub fn ra<A>(t: impl Into<String>, c: Color32, a: A) -> R<A> {
-    R { t: t.into(), c, a: Some(a), bg: None, dbl: None }
+    R {
+        t: t.into(),
+        c,
+        a: Some(a),
+        bg: None,
+        dbl: None,
+    }
 }
 
 /// A keycap: text on a solid colour.
 pub fn chip<A>(t: impl Into<String>, fg: Color32, bg: Color32) -> R<A> {
-    R { t: t.into(), c: fg, a: None, bg: Some(bg), dbl: None }
+    R {
+        t: t.into(),
+        c: fg,
+        a: None,
+        bg: Some(bg),
+        dbl: None,
+    }
 }
 
 /// A keycap that answers a click. On hover it keeps its colour and takes a
 /// ring, so the key still reads as its category.
 pub fn chipa<A>(t: impl Into<String>, fg: Color32, bg: Color32, a: A) -> R<A> {
-    R { t: t.into(), c: fg, a: Some(a), bg: Some(bg), dbl: None }
+    R {
+        t: t.into(),
+        c: fg,
+        a: Some(a),
+        bg: Some(bg),
+        dbl: None,
+    }
 }
 
 /// A run that only answers a double-click; single clicks pass it by.
 pub fn rd<A>(t: impl Into<String>, c: Color32, dbl: A) -> R<A> {
-    R { t: t.into(), c, a: None, bg: None, dbl: Some(dbl) }
+    R {
+        t: t.into(),
+        c,
+        a: None,
+        bg: None,
+        dbl: Some(dbl),
+    }
 }
 
 #[derive(Clone)]
@@ -83,7 +115,10 @@ impl<A> Row<A> {
         Row { runs, act: Some(a) }
     }
     pub fn blank() -> Self {
-        Row { runs: Vec::new(), act: None }
+        Row {
+            runs: Vec::new(),
+            act: None,
+        }
     }
     pub fn cols(&self) -> usize {
         self.runs.iter().map(|x| x.t.chars().count()).sum()
@@ -101,7 +136,14 @@ pub struct Out<A> {
     pub rect: Rect,
 }
 
-fn paint_runs<A>(g: &Grid, p: &egui::Painter, pos: Pos2, runs: &[R<A>], alpha: f32, hot: Option<usize>) {
+fn paint_runs<A>(
+    g: &Grid,
+    p: &egui::Painter,
+    pos: Pos2,
+    runs: &[R<A>],
+    alpha: f32,
+    hot: Option<usize>,
+) {
     let mut x = pos.x;
     let mut out: Vec<(String, Color32)> = Vec::with_capacity(runs.len());
     for (i, run) in runs.iter().enumerate() {
@@ -113,7 +155,12 @@ fn paint_runs<A>(g: &Grid, p: &egui::Painter, pos: Pos2, runs: &[R<A>], alpha: f
         if hot == Some(i) {
             if run.a.is_some() && run.bg.is_some() {
                 // A clickable keycap: lift and ring, colour kept.
-                p.rect_stroke(cell.expand(1.5), 4.0, Stroke::new(1.5, TEXT.gamma_multiply(alpha)), StrokeKind::Outside);
+                p.rect_stroke(
+                    cell.expand(1.5),
+                    4.0,
+                    Stroke::new(1.5, TEXT.gamma_multiply(alpha)),
+                    StrokeKind::Outside,
+                );
                 out.push((run.t.clone(), run.c));
             } else if run.a.is_some() {
                 p.rect_filled(cell, 3.0, RUST.gamma_multiply(alpha));
@@ -121,7 +168,12 @@ fn paint_runs<A>(g: &Grid, p: &egui::Painter, pos: Pos2, runs: &[R<A>], alpha: f
             } else {
                 // Double-click targets: a lift, not an inversion.
                 p.rect_filled(cell, 3.0, IRON_HI.gamma_multiply(alpha));
-                p.rect_stroke(cell, 3.0, Stroke::new(1.0, EDGE.gamma_multiply(alpha)), StrokeKind::Inside);
+                p.rect_stroke(
+                    cell,
+                    3.0,
+                    Stroke::new(1.0, EDGE.gamma_multiply(alpha)),
+                    StrokeKind::Inside,
+                );
                 out.push((run.t.clone(), TEXT));
             }
         } else {
@@ -144,7 +196,12 @@ pub const RULE: f32 = 2.0;
 
 /// The shared shadow: blurred, offset down, never a second edge.
 pub fn shadow(alpha: f32) -> egui::epaint::Shadow {
-    egui::epaint::Shadow { offset: [0, 6], blur: 20, spread: 0, color: Color32::from_black_alpha((150.0 * alpha) as u8) }
+    egui::epaint::Shadow {
+        offset: [0, 6],
+        blur: 20,
+        spread: 0,
+        color: Color32::from_black_alpha((150.0 * alpha) as u8),
+    }
 }
 
 /// Frame of a window or menu. The rule is the window's edge: the body is
@@ -152,13 +209,24 @@ pub fn shadow(alpha: f32) -> egui::epaint::Shadow {
 pub fn frame(p: &egui::Painter, body: Rect, alpha: f32) {
     p.add(shadow(alpha).as_shape(body, ROUND));
     p.rect_filled(body, ROUND, IRON.gamma_multiply(alpha));
-    p.rect_stroke(body, ROUND, Stroke::new(RULE, EDGE.gamma_multiply(alpha)), StrokeKind::Inside);
+    p.rect_stroke(
+        body,
+        ROUND,
+        Stroke::new(RULE, EDGE.gamma_multiply(alpha)),
+        StrokeKind::Inside,
+    );
 }
 
 /// A divider inside a frame: one cell short of the rule on each side.
 fn divider(p: &egui::Painter, g: &Grid, body: Rect, y: f32, alpha: f32) {
     let y = y.round() + 0.5;
-    p.line_segment([Pos2::new(body.left() + g.cw, y), Pos2::new(body.right() - g.cw, y)], Stroke::new(1.0, EDGE.gamma_multiply(alpha)));
+    p.line_segment(
+        [
+            Pos2::new(body.left() + g.cw, y),
+            Pos2::new(body.right() - g.cw, y),
+        ],
+        Stroke::new(1.0, EDGE.gamma_multiply(alpha)),
+    );
 }
 
 /// Window layout: half a row of padding, the title row, a divider, the
@@ -184,7 +252,13 @@ pub fn dialog<A: Clone>(
     close: A,
     mut extra: impl FnMut(&mut Ui, Pos2),
 ) -> Out<A> {
-    let mut out = Out { click: None, at: None, double: None, hovered: false, rect: Rect::NOTHING };
+    let mut out = Out {
+        click: None,
+        at: None,
+        double: None,
+        hovered: false,
+        rect: Rect::NOTHING,
+    };
     let lift = (1.0 - alpha) * g.rh * 0.6;
     Area::new(Id::new(id))
         .fixed_pos(pos + Vec2::new(0.0, lift))
@@ -223,7 +297,11 @@ pub fn dialog<A: Clone>(
                     None
                 };
                 if hot_row && row.act.is_some() && hot_run.is_none() {
-                    p.rect_filled(Rect::from_min_max(Pos2::new(inner_l, y), Pos2::new(inner_r, y + g.rh)), 3.0, IRON_HI.gamma_multiply(alpha));
+                    p.rect_filled(
+                        Rect::from_min_max(Pos2::new(inner_l, y), Pos2::new(inner_r, y + g.rh)),
+                        3.0,
+                        IRON_HI.gamma_multiply(alpha),
+                    );
                 }
                 paint_runs(g, p, Pos2::new(o.x, y), &row.runs, alpha, hot_run);
             }
@@ -246,7 +324,10 @@ pub fn dialog<A: Clone>(
                         let cell = |j: usize| {
                             let x0: usize = row.runs[..j].iter().map(|x| x.t.chars().count()).sum();
                             let w = row.runs[j].t.chars().count();
-                            Rect::from_min_size(Pos2::new(o.x + x0 as f32 * g.cw, o.y + i * g.rh), g.size(w, 1))
+                            Rect::from_min_size(
+                                Pos2::new(o.x + x0 as f32 * g.cw, o.y + i * g.rh),
+                                g.size(w, 1),
+                            )
                         };
                         if resp.double_clicked() {
                             if let (Some(j), Some(a)) = (j, run.and_then(|x| x.dbl.clone())) {
@@ -270,22 +351,69 @@ pub fn dialog<A: Clone>(
 }
 
 pub fn dialog_size<A>(g: &Grid, title: &str, rows: &[Row<A>], min: usize) -> Vec2 {
-    let inner = rows.iter().map(Row::cols).max().unwrap_or(0).max(min).max(title.chars().count() + 6);
-    Vec2::new((inner + 4) as f32 * g.cw, (rows.len() as f32 + HEAD + 0.5) * g.rh)
+    let inner = rows
+        .iter()
+        .map(Row::cols)
+        .max()
+        .unwrap_or(0)
+        .max(min)
+        .max(title.chars().count() + 6);
+    Vec2::new(
+        (inner + 4) as f32 * g.cw,
+        (rows.len() as f32 + HEAD + 0.5) * g.rh,
+    )
 }
 
 pub enum Item<A> {
-    Act { label: String, key: String, act: A, on: bool },
+    Act {
+        label: String,
+        key: String,
+        act: A,
+        on: bool,
+    },
     Rule,
 }
 
 /// A menu dropdown: the same rounded frame, shortcut right-aligned, hovered
 /// row inverted, disabled rows dim. Dividers stop one cell short of the
 /// frame on both sides so they read as dividers, not as more frame.
-pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, items: &[Item<A>], alpha: f32) -> Out<A> {
-    let mut out = Out { click: None, at: None, double: None, hovered: false, rect: Rect::NOTHING };
-    let lw = items.iter().map(|i| if let Item::Act { label, .. } = i { label.chars().count() } else { 0 }).max().unwrap_or(0);
-    let kw = items.iter().map(|i| if let Item::Act { key, .. } = i { key.chars().count() } else { 0 }).max().unwrap_or(0);
+pub fn dropdown<A: Clone>(
+    ctx: &egui::Context,
+    g: &Grid,
+    id: &str,
+    pos: Pos2,
+    items: &[Item<A>],
+    alpha: f32,
+) -> Out<A> {
+    let mut out = Out {
+        click: None,
+        at: None,
+        double: None,
+        hovered: false,
+        rect: Rect::NOTHING,
+    };
+    let lw = items
+        .iter()
+        .map(|i| {
+            if let Item::Act { label, .. } = i {
+                label.chars().count()
+            } else {
+                0
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    let kw = items
+        .iter()
+        .map(|i| {
+            if let Item::Act { key, .. } = i {
+                key.chars().count()
+            } else {
+                0
+            }
+        })
+        .max()
+        .unwrap_or(0);
     let w = lw + kw + 8;
     let lift = (1.0 - alpha) * g.rh * 0.6;
     Area::new(Id::new(id))
@@ -293,12 +421,17 @@ pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, it
         .order(Order::Foreground)
         .interactable(alpha > 0.05)
         .show(ctx, |ui| {
-            let (body, resp) = ui.allocate_exact_size(Vec2::new(w as f32 * g.cw, (items.len() as f32 + 1.0) * g.rh), Sense::CLICK);
+            let (body, resp) = ui.allocate_exact_size(
+                Vec2::new(w as f32 * g.cw, (items.len() as f32 + 1.0) * g.rh),
+                Sense::CLICK,
+            );
             let p = ui.painter();
             frame(p, body, alpha);
             let top = body.top() + g.rh * 0.5;
             let rule = body.shrink(RULE + 3.0);
-            let hr = resp.hover_pos().map(|h| ((h.y - top) / g.rh).floor() as isize);
+            let hr = resp
+                .hover_pos()
+                .map(|h| ((h.y - top) / g.rh).floor() as isize);
             for (i, it) in items.iter().enumerate() {
                 let y = top + i as f32 * g.rh;
                 match it {
@@ -306,7 +439,14 @@ pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, it
                     Item::Act { label, key, on, .. } => {
                         let hot = *on && hr == Some(i as isize);
                         if hot {
-                            p.rect_filled(Rect::from_min_max(Pos2::new(rule.left(), y), Pos2::new(rule.right(), y + g.rh)), 3.0, RUST.gamma_multiply(alpha));
+                            p.rect_filled(
+                                Rect::from_min_max(
+                                    Pos2::new(rule.left(), y),
+                                    Pos2::new(rule.right(), y + g.rh),
+                                ),
+                                3.0,
+                                RUST.gamma_multiply(alpha),
+                            );
                         }
                         let (tc, kc) = match (hot, on) {
                             (true, _) => (STAGE, STAGE),
@@ -316,7 +456,11 @@ pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, it
                         g.line(
                             p,
                             Pos2::new(body.left() + g.cw * 2.0, y),
-                            &[(format!("{label:<lw$}"), tc), ("   ".into(), tc), (format!("{key:>kw$}"), kc)],
+                            &[
+                                (format!("{label:<lw$}"), tc),
+                                ("   ".into(), tc),
+                                (format!("{key:>kw$}"), kc),
+                            ],
                             alpha,
                         );
                     }
@@ -337,11 +481,25 @@ pub fn dropdown<A: Clone>(ctx: &egui::Context, g: &Grid, id: &str, pos: Pos2, it
 
 /// A framed note on the stage (empty folder, undecodable file).
 pub fn card(p: &egui::Painter, g: &Grid, center: Pos2, lines: &[(&str, Color32)]) -> Rect {
-    let cols = lines.iter().map(|(s, _)| s.chars().count()).max().unwrap_or(0) + 4;
-    let body = Rect::from_center_size(center, Vec2::new(cols as f32 * g.cw, (lines.len() as f32 + 1.0) * g.rh));
+    let cols = lines
+        .iter()
+        .map(|(s, _)| s.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 4;
+    let body = Rect::from_center_size(
+        center,
+        Vec2::new(cols as f32 * g.cw, (lines.len() as f32 + 1.0) * g.rh),
+    );
     frame(p, body, 1.0);
     for (i, (s, c)) in lines.iter().enumerate() {
-        g.text(p, body.min + Vec2::new(g.cw * 2.0, (i as f32 + 0.5) * g.rh), s, *c, 1.0);
+        g.text(
+            p,
+            body.min + Vec2::new(g.cw * 2.0, (i as f32 + 0.5) * g.rh),
+            s,
+            *c,
+            1.0,
+        );
     }
     body
 }

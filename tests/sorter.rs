@@ -35,15 +35,25 @@ fn classify(t: &mut Tree, active: usize, name: &str, cat: usize) -> (usize, Stri
 fn throw_moves_file_assigns_cid_and_undo_restores() {
     let root = lib("throw");
     let mut t = Tree::scan(&root, config::defaults()).unwrap();
-    let z = t.cats.iter().position(|c| c.key.as_deref() == Some("z")).unwrap();
+    let z = t
+        .cats
+        .iter()
+        .position(|c| c.key.as_deref() == Some("z"))
+        .unwrap();
     assert_eq!(t.nodes[0].files.len(), 4);
 
     let (d, n) = classify(&mut t, 0, "img_0.png", z);
-    assert_eq!(n, "img_0 (2).png", "name collision gets a suffix, nothing is overwritten");
+    assert_eq!(
+        n, "img_0 (2).png",
+        "name collision gets a suffix, nothing is overwritten"
+    );
     assert!(root.join("1/img_0 (2).png").exists());
     assert_eq!(fs::read(root.join("1/img_0.png")).unwrap(), b"collision");
     assert_eq!(t.nodes[0].files.len(), 3);
-    assert!(t.nodes[d].files.iter().all(|f| f.cat == Some(z)), "in-app cid follows the slot");
+    assert!(
+        t.nodes[d].files.iter().all(|f| f.cat == Some(z)),
+        "in-app cid follows the slot"
+    );
 
     // A slot that did not exist yet is created on the first throw.
     let spc = t.cats.iter().position(|c| c.name == "_float_").unwrap();
@@ -67,7 +77,11 @@ fn rotate_flip_and_restore_bytes() {
     let orig = ops::save_ops(&p, &[Op::RotCw]).unwrap();
     let im = image::open(&p).unwrap().to_rgb8();
     assert_eq!((im.width(), im.height()), (4, 6));
-    assert_eq!(*im.get_pixel(3, 0), Rgb([255, 0, 0]), "top-left pixel lands top-right after cw");
+    assert_eq!(
+        *im.get_pixel(3, 0),
+        Rgb([255, 0, 0]),
+        "top-left pixel lands top-right after cw"
+    );
     ops::save_ops(&p, &[Op::FlipH]).unwrap();
     let im = image::open(&p).unwrap().to_rgb8();
     assert_eq!(*im.get_pixel(0, 0), Rgb([255, 0, 0]));
@@ -81,7 +95,12 @@ fn categories_round_trip_and_recat() {
     let mut t = Tree::scan(&root, config::defaults()).unwrap();
     let before = t.nodes[0].kids.len();
     fs::create_dir_all(root.join("street")).unwrap();
-    t.cats.push(Cat { key: Some("b".into()), name: "street".into(), cid: (240, 163, 94), tier: 'b' });
+    t.cats.push(Cat {
+        key: Some("b".into()),
+        name: "street".into(),
+        cid: (240, 163, 94),
+        tier: 'b',
+    });
     config::save(&root, &t.cats).unwrap();
     assert_eq!(config::load(&root).len(), t.cats.len());
     let s = t.ensure_child(0, "street");
@@ -94,7 +113,11 @@ fn categories_round_trip_and_recat() {
 fn manifest_and_export_set() {
     let root = lib("export");
     let mut t = Tree::scan(&root, config::defaults()).unwrap();
-    let x = t.cats.iter().position(|c| c.key.as_deref() == Some("x")).unwrap();
+    let x = t
+        .cats
+        .iter()
+        .position(|c| c.key.as_deref() == Some("x"))
+        .unwrap();
     classify(&mut t, 0, "img_3.png", x);
     let m = ops::manifest(&t);
     assert!(m.lines().any(|l| l == "2/img_3.png,2,c,#92CC7C"), "{m}");

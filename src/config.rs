@@ -82,7 +82,9 @@ pub fn parse(text: &str) -> Vec<Cat> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .filter_map(|l| {
             let f: Vec<&str> = l.split_whitespace().collect();
-            let [key, name, cid, tier] = f[..] else { return None };
+            let [key, name, cid, tier] = f[..] else {
+                return None;
+            };
             Some(Cat {
                 key: (key != "-").then(|| key.to_string()),
                 name: name.to_string(),

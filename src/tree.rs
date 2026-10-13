@@ -7,8 +7,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub const IMAGES: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "ico", "tga", "qoi", "pnm"];
-pub const OTHER_MEDIA: &[&str] = &["heic", "avif", "jxl", "mp4", "mov", "mkv", "webm", "avi", "m4v"];
+pub const IMAGES: &[&str] = &[
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "ico", "tga", "qoi", "pnm",
+];
+pub const OTHER_MEDIA: &[&str] = &[
+    "heic", "avif", "jxl", "mp4", "mov", "mkv", "webm", "avi", "m4v",
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
@@ -64,7 +68,9 @@ pub struct Tree {
 }
 
 fn ext(name: &str) -> String {
-    name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+    name.rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 pub fn is_media(name: &str) -> bool {
@@ -78,13 +84,22 @@ pub fn is_decodable(name: &str) -> bool {
 
 impl Tree {
     pub fn scan(root: &Path, cats: Vec<Cat>) -> io::Result<Tree> {
-        let mut t = Tree { root: root.to_path_buf(), nodes: Vec::new(), cats };
+        let mut t = Tree {
+            root: root.to_path_buf(),
+            nodes: Vec::new(),
+            cats,
+        };
         t.add(root, None, None)?;
         t.nodes[0].open = true;
         Ok(t)
     }
 
-    fn add(&mut self, p: &Path, parent: Option<usize>, inherited: Option<usize>) -> io::Result<usize> {
+    fn add(
+        &mut self,
+        p: &Path,
+        parent: Option<usize>,
+        inherited: Option<usize>,
+    ) -> io::Result<usize> {
         let name = p
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
@@ -181,17 +196,29 @@ impl Tree {
             x = self.nodes[i].parent;
         }
         parts.reverse();
-        if parts.is_empty() { ".".into() } else { parts.join("/") }
+        if parts.is_empty() {
+            ".".into()
+        } else {
+            parts.join("/")
+        }
     }
 
     /// Absolute directory path on disk.
     pub fn dir(&self, id: usize) -> PathBuf {
         let rel = self.path(id);
-        if rel == "." { self.root.clone() } else { self.root.join(rel) }
+        if rel == "." {
+            self.root.clone()
+        } else {
+            self.root.join(rel)
+        }
     }
 
     pub fn child(&self, parent: usize, name: &str) -> Option<usize> {
-        self.nodes[parent].kids.iter().copied().find(|&k| self.nodes[k].name == name)
+        self.nodes[parent]
+            .kids
+            .iter()
+            .copied()
+            .find(|&k| self.nodes[k].name == name)
     }
 
     /// Child node for a directory that now exists on disk.
@@ -201,7 +228,10 @@ impl Tree {
         }
         let own_cat = self.cats.iter().position(|c| c.name == name);
         let id = self.nodes.len();
-        let side = self.nodes[parent].kids.first().map_or(Side::Down, |&k| self.nodes[k].side);
+        let side = self.nodes[parent]
+            .kids
+            .first()
+            .map_or(Side::Down, |&k| self.nodes[k].side);
         self.nodes.push(Node {
             name: name.to_string(),
             parent: Some(parent),
@@ -229,7 +259,13 @@ impl Tree {
         let cat = self.eff_cat(node);
         let files = &mut self.nodes[node].files;
         let i = files.partition_point(|f| f.name.as_str() < name);
-        files.insert(i, FileEntry { name: name.to_string(), cat });
+        files.insert(
+            i,
+            FileEntry {
+                name: name.to_string(),
+                cat,
+            },
+        );
         i
     }
 

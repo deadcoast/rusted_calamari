@@ -10,9 +10,9 @@
 //!   a row the tide pins under the pointer stays exactly still while the
 //!   tree reshapes around it.
 
-use std::collections::HashMap;
 use octo::layout::{Frame, Key, Line};
 use octo::tree::Tree;
+use std::collections::HashMap;
 
 /// Approach rate (1/s). ~90% of the way in 160 ms.
 const RATE: f32 = 14.0;
@@ -93,7 +93,11 @@ impl Motion {
     /// in view.
     pub fn step(&mut self, t: &Tree, f: &Frame, scroll: usize, rows: usize, now: f64) {
         let fresh = self.rows.is_empty() || self.t == 0.0;
-        let dt = if fresh { 0.0 } else { (now - self.t).clamp(0.0, 0.1) as f32 };
+        let dt = if fresh {
+            0.0
+        } else {
+            (now - self.t).clamp(0.0, 0.1) as f32
+        };
         self.t = now;
         let k = 1.0 - (-dt * RATE).exp();
         let mut index: HashMap<Key, usize> = HashMap::with_capacity(f.lines.len());
@@ -107,12 +111,26 @@ impl Motion {
             .iter()
             .enumerate()
             .filter(|(_, l)| !self.rows.contains_key(&l.key))
-            .map(|(i, l)| (l.key, if fresh { i as f32 } else { self.origin(t, l.key).unwrap_or(i as f32) }))
+            .map(|(i, l)| {
+                (
+                    l.key,
+                    if fresh {
+                        i as f32
+                    } else {
+                        self.origin(t, l.key).unwrap_or(i as f32)
+                    },
+                )
+            })
             .collect();
 
         // Deaths near the view leave as ghosts.
         let (lo, hi) = (self.scroll - 2.0, self.scroll + rows as f32 + 2.0);
-        let dead: Vec<Key> = self.rows.keys().filter(|k| !index.contains_key(*k)).copied().collect();
+        let dead: Vec<Key> = self
+            .rows
+            .keys()
+            .filter(|k| !index.contains_key(*k))
+            .copied()
+            .collect();
         for key in dead {
             let r = self.rows.remove(&key).unwrap();
             if let Some(line) = r.line
@@ -121,15 +139,30 @@ impl Motion {
                 && !fresh
             {
                 let to = Self::dest(t, key, &index).unwrap_or(r.pos);
-                self.ghosts.push(Ghost { line, pos: r.pos, to, a: r.a });
+                self.ghosts.push(Ghost {
+                    line,
+                    pos: r.pos,
+                    to,
+                    a: r.a,
+                });
             }
         }
         for (key, pos) in born {
-            self.rows.insert(key, Row { pos, a: if fresh { 1.0 } else { 0.0 }, line: None });
+            self.rows.insert(
+                key,
+                Row {
+                    pos,
+                    a: if fresh { 1.0 } else { 0.0 },
+                    line: None,
+                },
+            );
         }
 
         let mut settled = true;
-        let near = (scroll as f32 - rows as f32, scroll as f32 + 2.0 * rows as f32);
+        let near = (
+            scroll as f32 - rows as f32,
+            scroll as f32 + 2.0 * rows as f32,
+        );
         for (i, l) in f.lines.iter().enumerate() {
             let r = self.rows.get_mut(&l.key).unwrap();
             let to = i as f32;
@@ -173,19 +206,32 @@ impl Motion {
     /// Lines inside the view (with a row of margin), with their displayed
     /// place and opacity; rows sliding past the top or bottom edge fade.
     pub fn visible(&self, f: &Frame, rows: usize) -> Vec<Drawn> {
-        let edge = |y: f32, a: f32| a * (y + 1.0).clamp(0.0, 1.0) * (rows as f32 - y).clamp(0.0, 1.0);
+        let edge =
+            |y: f32, a: f32| a * (y + 1.0).clamp(0.0, 1.0) * (rows as f32 - y).clamp(0.0, 1.0);
         let mut out = Vec::new();
         for (i, l) in f.lines.iter().enumerate() {
-            let Some(r) = self.rows.get(&l.key) else { continue };
+            let Some(r) = self.rows.get(&l.key) else {
+                continue;
+            };
             let y = r.pos - self.scroll;
             if y > -1.0 && y < rows as f32 {
-                out.push(Drawn { idx: Some(i), ghost: None, y, a: edge(y, r.a) });
+                out.push(Drawn {
+                    idx: Some(i),
+                    ghost: None,
+                    y,
+                    a: edge(y, r.a),
+                });
             }
         }
         for (gi, g) in self.ghosts.iter().enumerate() {
             let y = g.pos - self.scroll;
             if y > -1.0 && y < rows as f32 {
-                out.push(Drawn { idx: None, ghost: Some(gi), y, a: edge(y, g.a.max(0.0)) });
+                out.push(Drawn {
+                    idx: None,
+                    ghost: Some(gi),
+                    y,
+                    a: edge(y, g.a.max(0.0)),
+                });
             }
         }
         out

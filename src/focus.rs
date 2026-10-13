@@ -76,13 +76,20 @@ pub fn fit(aspect: f32, bound: Vec2) -> Vec2 {
 pub fn rescale(budget: Vec2, was: Vec2, now: Vec2) -> Vec2 {
     let rx = now.x / was.x.max(1.0);
     let ry = now.y / was.y.max(1.0);
-    budget * if (rx - 1.0).abs() >= (ry - 1.0).abs() { rx } else { ry }
+    budget
+        * if (rx - 1.0).abs() >= (ry - 1.0).abs() {
+            rx
+        } else {
+            ry
+        }
 }
 
 /// `size` centred on `center`, moved (never shrunk below what fits) to sit
 /// inside `work`.
 pub fn place(size: Vec2, center: Pos2, work: Option<Rect>) -> Rect {
-    let Some(w) = work else { return Rect::from_center_size(center, size) };
+    let Some(w) = work else {
+        return Rect::from_center_size(center, size);
+    };
     let r = Rect::from_center_size(center, size.min(w.size()));
     let dx = if r.left() < w.left() {
         w.left() - r.left()
@@ -135,7 +142,11 @@ impl Focus {
     pub fn step(&mut self, ctx: &Context, active: bool, want: &Want, work: Option<Rect>, now: f64) {
         let (cur, maxed, full) = ctx.input(|i| {
             let v = i.viewport();
-            (v.inner_rect, v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false))
+            (
+                v.inner_rect,
+                v.maximized.unwrap_or(false),
+                v.fullscreen.unwrap_or(false),
+            )
         });
         let size = cur.map_or_else(|| ctx.content_rect().size(), |r| r.size());
         if active && !self.on {
@@ -198,13 +209,19 @@ impl Focus {
             ctx.request_repaint_after(std::time::Duration::from_millis(60));
             return;
         }
-        let Some(aspect) = want.aspect.filter(|a| a.is_finite() && *a > 0.0) else { return };
+        let Some(aspect) = want.aspect.filter(|a| a.is_finite() && *a > 0.0) else {
+            return;
+        };
         let bound = match (self.stage, work) {
             (Stage::Large, Some(w)) => w.size(),
             _ => self.budget,
         };
         let target = size_for(aspect, bound, want, work);
-        if (target - size).abs().max_elem() <= 1.5 || self.refused.is_some_and(|r| (r - target).abs().max_elem() <= 1.5) {
+        if (target - size).abs().max_elem() <= 1.5
+            || self
+                .refused
+                .is_some_and(|r| (r - target).abs().max_elem() <= 1.5)
+        {
             return;
         }
         if let Some(c) = cur {
@@ -212,7 +229,9 @@ impl Focus {
                 (Stage::Large, Some(w)) => w.center(),
                 _ => c.center(),
             };
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(place(target, center, work).min));
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
+                place(target, center, work).min,
+            ));
         }
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(target));
         self.sent = Some((target, now));
@@ -256,9 +275,13 @@ impl Focus {
             Some((_, true)) => ctx.send_viewport_cmd(ViewportCommand::Maximized(true)),
             Some((size, false)) => {
                 if let Some(c) = cur {
-                    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(place(size, c.center(), work).min));
+                    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
+                        place(size, c.center(), work).min,
+                    ));
                 }
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(work.map_or(size, |w| size.min(w.size()))));
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(
+                    work.map_or(size, |w| size.min(w.size())),
+                ));
             }
             None => {}
         }
@@ -267,7 +290,12 @@ impl Focus {
     /// The maximize button, F11 and a double-click on the top bar while
     /// focused: Fit, Large, Full, and back to Fit.
     pub fn cycle(&mut self, ctx: &Context, now: f64) {
-        let (maxed, full) = ctx.input(|i| (i.viewport().maximized.unwrap_or(false), i.viewport().fullscreen.unwrap_or(false)));
+        let (maxed, full) = ctx.input(|i| {
+            (
+                i.viewport().maximized.unwrap_or(false),
+                i.viewport().fullscreen.unwrap_or(false),
+            )
+        });
         self.stage = match (self.stage, full, maxed) {
             (_, true, _) | (Stage::Full, _, _) => {
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
@@ -315,14 +343,21 @@ pub fn work_area(frame: &eframe::Frame, ctx: &Context) -> Option<Rect> {
     let c = cur.map_or(Pos2::ZERO, |r| r.center());
     let ox = (c.x / mon.x).floor().max(0.0) * mon.x;
     let oy = (c.y / mon.y).floor().max(0.0) * mon.y;
-    Some(Rect::from_min_max(Pos2::new(ox, oy + 32.0), Pos2::new(ox + mon.x, oy + mon.y - 56.0)))
+    Some(Rect::from_min_max(
+        Pos2::new(ox, oy + 32.0),
+        Pos2::new(ox + mon.x, oy + mon.y - 56.0),
+    ))
 }
 
 #[cfg(windows)]
 fn windows_work_area(frame: &eframe::Frame, ppp: f32) -> Option<Rect> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-    let RawWindowHandle::Win32(h) = frame.window_handle().ok()?.as_raw() else { return None };
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    let RawWindowHandle::Win32(h) = frame.window_handle().ok()?.as_raw() else {
+        return None;
+    };
     // SAFETY: plain Win32 queries on our own window handle; MONITORINFO is
     // a C struct whose size we pass in.
     unsafe {
@@ -336,7 +371,10 @@ fn windows_work_area(frame: &eframe::Frame, ppp: f32) -> Option<Rect> {
             return None;
         }
         let r = mi.rcWork;
-        Some(Rect::from_min_max(Pos2::new(r.left as f32 / ppp, r.top as f32 / ppp), Pos2::new(r.right as f32 / ppp, r.bottom as f32 / ppp)))
+        Some(Rect::from_min_max(
+            Pos2::new(r.left as f32 / ppp, r.top as f32 / ppp),
+            Pos2::new(r.right as f32 / ppp, r.bottom as f32 / ppp),
+        ))
     }
 }
 
@@ -347,7 +385,11 @@ mod tests {
     #[test]
     fn fit_fills_the_tighter_side() {
         let b = Vec2::new(1440.0, 900.0);
-        assert_eq!(fit(2.0 / 3.0, b), Vec2::new(600.0, 900.0), "portrait: full height");
+        assert_eq!(
+            fit(2.0 / 3.0, b),
+            Vec2::new(600.0, 900.0),
+            "portrait: full height"
+        );
         let l = fit(1.5, b);
         assert_eq!(l, Vec2::new(1350.0, 900.0), "3:2: full height");
         let p = fit(3.0, b);
@@ -356,16 +398,40 @@ mod tests {
 
     #[test]
     fn window_wraps_the_picture_and_grows_for_dialogs() {
-        let want = Want { aspect: None, chrome: Vec2::ZERO, need: Vec2::ZERO, min: Vec2::new(380.0, 200.0) };
-        assert_eq!(size_for(2.0 / 3.0, Vec2::new(1440.0, 900.0), &want, None), Vec2::new(600.0, 900.0));
-        let want = Want { need: Vec2::new(760.0, 500.0), ..want };
-        assert_eq!(size_for(2.0 / 3.0, Vec2::new(1440.0, 900.0), &want, None), Vec2::new(760.0, 900.0));
+        let want = Want {
+            aspect: None,
+            chrome: Vec2::ZERO,
+            need: Vec2::ZERO,
+            min: Vec2::new(380.0, 200.0),
+        };
+        assert_eq!(
+            size_for(2.0 / 3.0, Vec2::new(1440.0, 900.0), &want, None),
+            Vec2::new(600.0, 900.0)
+        );
+        let want = Want {
+            need: Vec2::new(760.0, 500.0),
+            ..want
+        };
+        assert_eq!(
+            size_for(2.0 / 3.0, Vec2::new(1440.0, 900.0), &want, None),
+            Vec2::new(760.0, 900.0)
+        );
         // Pinned bars: the picture keeps its shape, the bars add height.
-        let want = Want { chrome: Vec2::new(0.0, 60.0), need: Vec2::ZERO, ..want };
-        assert_eq!(size_for(1.0, Vec2::new(1000.0, 1000.0), &want, None), Vec2::new(940.0, 1000.0));
+        let want = Want {
+            chrome: Vec2::new(0.0, 60.0),
+            need: Vec2::ZERO,
+            ..want
+        };
+        assert_eq!(
+            size_for(1.0, Vec2::new(1000.0, 1000.0), &want, None),
+            Vec2::new(940.0, 1000.0)
+        );
         // Never larger than the work area.
         let work = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let want = Want { chrome: Vec2::ZERO, ..want };
+        let want = Want {
+            chrome: Vec2::ZERO,
+            ..want
+        };
         let s = size_for(2.0 / 3.0, Vec2::new(1440.0, 2000.0), &want, Some(work));
         assert!(s.x <= 800.0 && s.y <= 600.0, "{s:?}");
     }
@@ -375,9 +441,15 @@ mod tests {
         let b = Vec2::new(1440.0, 900.0);
         // A portrait window 600x900 dragged wider to 800: everything grows by 4/3.
         let nb = rescale(b, Vec2::new(600.0, 900.0), Vec2::new(800.0, 900.0));
-        assert!((nb.x - 1920.0).abs() < 0.01 && (nb.y - 1200.0).abs() < 0.01, "{nb:?}");
+        assert!(
+            (nb.x - 1920.0).abs() < 0.01 && (nb.y - 1200.0).abs() < 0.01,
+            "{nb:?}"
+        );
         let nb = rescale(b, Vec2::new(600.0, 900.0), Vec2::new(600.0, 450.0));
-        assert!((nb.y - 450.0).abs() < 0.01 && (nb.x - 720.0).abs() < 0.01, "{nb:?}");
+        assert!(
+            (nb.y - 450.0).abs() < 0.01 && (nb.x - 720.0).abs() < 0.01,
+            "{nb:?}"
+        );
     }
 
     #[test]
@@ -387,7 +459,11 @@ mod tests {
         assert_eq!(r.center(), Pos2::new(960.0, 520.0));
         let r = place(Vec2::new(600.0, 900.0), Pos2::new(100.0, 520.0), Some(work));
         assert_eq!(r.left(), 0.0, "pushed back on screen");
-        let r = place(Vec2::new(600.0, 1200.0), Pos2::new(960.0, 520.0), Some(work));
+        let r = place(
+            Vec2::new(600.0, 1200.0),
+            Pos2::new(960.0, 520.0),
+            Some(work),
+        );
         assert!(r.height() <= 1040.0 && r.top() >= 0.0);
     }
 }

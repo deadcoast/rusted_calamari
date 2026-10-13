@@ -17,7 +17,9 @@
 use crate::fonts::icon;
 use crate::glyph::{Grid, Run};
 use crate::theme::{self, DIM, EDGE, IRON, IRON_HI, MUTED, RUST_HI, STAGE, TEXT};
-use eframe::egui::{self, Align2, Area, Color32, CursorIcon, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
+use eframe::egui::{
+    self, Align2, Area, Color32, CursorIcon, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
+};
 
 pub struct Tool<A> {
     /// Stable name; animation state is keyed on it.
@@ -59,7 +61,12 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new(g: &Grid) -> Metrics {
-        Metrics { btn: (g.rh * 1.7).round(), gap: 2.0, sep: 9.0, pad: 4.0 }
+        Metrics {
+            btn: (g.rh * 1.7).round(),
+            gap: 2.0,
+            sep: 9.0,
+            pad: 4.0,
+        }
     }
 }
 
@@ -85,7 +92,10 @@ pub fn layout(groups: &[u8], m: &Metrics, max_w: f32) -> (Vec<Rect>, Vec<(f32, u
                 x += lead;
             }
         }
-        cells.push(Rect::from_min_size(Pos2::new(x, m.pad + row as f32 * (m.btn + m.gap)), Vec2::splat(m.btn)));
+        cells.push(Rect::from_min_size(
+            Pos2::new(x, m.pad + row as f32 * (m.btn + m.gap)),
+            Vec2::splat(m.btn),
+        ));
         x += m.btn;
         w = w.max(x + m.pad);
     }
@@ -111,8 +121,21 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 /// shared interface fade; the strip slides in a few points as it fades in.
 /// A strip that isn't `live` takes no input.
 #[allow(clippy::too_many_arguments)]
-pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32, tools: &[Tool<A>], alpha: f32, live: bool, now: f64) -> Out<A> {
-    let mut out = Out { click: None, hovered: false, rect: Rect::NOTHING };
+pub fn show<A: Clone>(
+    ctx: &egui::Context,
+    g: &Grid,
+    top_right: Pos2,
+    max_w: f32,
+    tools: &[Tool<A>],
+    alpha: f32,
+    live: bool,
+    now: f64,
+) -> Out<A> {
+    let mut out = Out {
+        click: None,
+        hovered: false,
+        rect: Rect::NOTHING,
+    };
     if tools.is_empty() || alpha < 0.01 {
         ctx.data_mut(|d| d.remove::<(Id, f64)>(Id::new("tool-tip-since")));
         return out;
@@ -136,7 +159,10 @@ pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32
             for (x, row) in &rules {
                 let y0 = body.top() + m.pad + *row as f32 * (m.btn + m.gap);
                 let x = (body.left() + x).round() + 0.5;
-                p.line_segment([Pos2::new(x, y0 + 7.0), Pos2::new(x, y0 + m.btn - 7.0)], Stroke::new(1.0, EDGE.gamma_multiply(alpha * 0.8)));
+                p.line_segment(
+                    [Pos2::new(x, y0 + 7.0), Pos2::new(x, y0 + m.btn - 7.0)],
+                    Stroke::new(1.0, EDGE.gamma_multiply(alpha * 0.8)),
+                );
             }
             for (i, (t, c)) in tools.iter().zip(&cells).enumerate() {
                 let r = c.translate(body.min.to_vec2());
@@ -156,7 +182,14 @@ pub fn show<A: Clone>(ctx: &egui::Context, g: &Grid, top_right: Pos2, max_w: f32
 }
 
 /// One button. Returns true on a click that should act.
-fn button<A>(ui: &egui::Ui, t: &Tool<A>, r: Rect, resp: &egui::Response, alpha: f32, now: f64) -> bool {
+fn button<A>(
+    ui: &egui::Ui,
+    t: &Tool<A>,
+    r: Rect,
+    resp: &egui::Response,
+    alpha: f32,
+    now: f64,
+) -> bool {
     let ctx = ui.ctx();
     let id = resp.id;
     let live = t.enabled || t.on;
@@ -178,20 +211,47 @@ fn button<A>(ui: &egui::Ui, t: &Tool<A>, r: Rect, resp: &egui::Response, alpha: 
         p.rect_filled(face, 5.0, bg.gamma_multiply(alpha));
     }
     if h > 0.0 && on < 1.0 {
-        p.rect_stroke(face, 5.0, Stroke::new(1.0, EDGE.gamma_multiply(alpha * h * (1.0 - on))), StrokeKind::Inside);
+        p.rect_stroke(
+            face,
+            5.0,
+            Stroke::new(1.0, EDGE.gamma_multiply(alpha * h * (1.0 - on))),
+            StrokeKind::Inside,
+        );
     }
 
     // Icon: lifts on hover, sinks and shrinks on press.
-    let col = if live { mix(mix(TEXT, RUST_HI, h), STAGE, on) } else { DIM };
+    let col = if live {
+        mix(mix(TEXT, RUST_HI, h), STAGE, on)
+    } else {
+        DIM
+    };
     let size = r.height() * 0.6 * (1.0 - 0.12 * d);
     let c = r.center() + Vec2::new(0.0, -1.5 * h * (1.0 - d) + d);
-    p.text(c, Align2::CENTER_CENTER, t.icon, icon(size, false), col.gamma_multiply(alpha));
+    p.text(
+        c,
+        Align2::CENTER_CENTER,
+        t.icon,
+        icon(size, false),
+        col.gamma_multiply(alpha),
+    );
     if let Some(b) = t.badge {
         let bpos = c + Vec2::new(size * 0.4, size * 0.36);
         // Knock the icon out behind the badge so it reads at any size.
         p.circle_filled(bpos, size * 0.3, bg.gamma_multiply(alpha));
-        let bc = if !live { DIM } else if on > 0.5 { STAGE } else { t.tone };
-        p.text(bpos, Align2::CENTER_CENTER, b, icon(size * 0.48, true), bc.gamma_multiply(alpha));
+        let bc = if !live {
+            DIM
+        } else if on > 0.5 {
+            STAGE
+        } else {
+            t.tone
+        };
+        p.text(
+            bpos,
+            Align2::CENTER_CENTER,
+            b,
+            icon(size * 0.48, true),
+            bc.gamma_multiply(alpha),
+        );
     }
 
     // Click ring: out from the button and gone in under half a second.
@@ -200,7 +260,12 @@ fn button<A>(ui: &egui::Ui, t: &Tool<A>, r: Rect, resp: &egui::Response, alpha: 
         if age < 1.0 {
             let e = 1.0 - (1.0 - age).powi(3);
             let ring = mix(t.tone, Color32::WHITE, 0.25);
-            p.rect_stroke(r.expand(1.0 + 7.0 * e), 5.0 + 4.0 * e, Stroke::new(2.0 * (1.0 - age), ring.gamma_multiply(alpha * (1.0 - age))), StrokeKind::Outside);
+            p.rect_stroke(
+                r.expand(1.0 + 7.0 * e),
+                5.0 + 4.0 * e,
+                Stroke::new(2.0 * (1.0 - age), ring.gamma_multiply(alpha * (1.0 - age))),
+                StrokeKind::Outside,
+            );
             ctx.request_repaint();
         }
     }
@@ -211,7 +276,15 @@ fn button<A>(ui: &egui::Ui, t: &Tool<A>, r: Rect, resp: &egui::Response, alpha: 
 }
 
 /// Name, shortcut and note under the hovered button, after a short hover.
-fn tooltip<A>(ctx: &egui::Context, g: &Grid, tools: &[Tool<A>], tip: Option<(usize, Rect)>, below: f32, alpha: f32, now: f64) {
+fn tooltip<A>(
+    ctx: &egui::Context,
+    g: &Grid,
+    tools: &[Tool<A>],
+    tip: Option<(usize, Rect)>,
+    below: f32,
+    alpha: f32,
+    now: f64,
+) {
     let key = Id::new("tool-tip-since");
     let Some((i, r)) = tip else {
         ctx.data_mut(|d| d.remove::<(Id, f64)>(key));
@@ -235,7 +308,11 @@ fn tooltip<A>(ctx: &egui::Context, g: &Grid, tools: &[Tool<A>], tip: Option<(usi
     if a < 0.01 {
         return;
     }
-    let mut lines: Vec<Vec<Run>> = vec![vec![(t.name.to_string(), TEXT), ("  ".into(), DIM), (t.keys.to_string(), MUTED)]];
+    let mut lines: Vec<Vec<Run>> = vec![vec![
+        (t.name.to_string(), TEXT),
+        ("  ".into(), DIM),
+        (t.keys.to_string(), MUTED),
+    ]];
     if !t.note.is_empty() {
         lines.push(vec![(t.note.to_string(), MUTED)]);
     }
@@ -247,16 +324,27 @@ fn tooltip<A>(ctx: &egui::Context, g: &Grid, tools: &[Tool<A>], tip: Option<(usi
     let screen = ctx.content_rect();
     // Right-aligned to the button, kept on screen; a tip wider than the
     // screen starts at its left edge.
-    let x = (r.right() - size.x).min(screen.right() - size.x - 4.0).max(screen.left() + 4.0);
+    let x = (r.right() - size.x)
+        .min(screen.right() - size.x - 4.0)
+        .max(screen.left() + 4.0);
     let pos = Pos2::new(x, below + 6.0 + (1.0 - a) * 4.0);
-    Area::new(Id::new("tool-tip-area")).fixed_pos(pos).order(Order::Tooltip).interactable(false).show(ctx, |ui| {
-        let (body, _) = ui.allocate_exact_size(size, Sense::hover());
-        let p = ui.painter();
-        theme::frame(p, body, a);
-        for (k, l) in lines.iter().enumerate() {
-            g.line(p, body.min + Vec2::new(g.cw * 2.0, (k as f32 + 0.5) * g.rh), l, a);
-        }
-    });
+    Area::new(Id::new("tool-tip-area"))
+        .fixed_pos(pos)
+        .order(Order::Tooltip)
+        .interactable(false)
+        .show(ctx, |ui| {
+            let (body, _) = ui.allocate_exact_size(size, Sense::hover());
+            let p = ui.painter();
+            theme::frame(p, body, a);
+            for (k, l) in lines.iter().enumerate() {
+                g.line(
+                    p,
+                    body.min + Vec2::new(g.cw * 2.0, (k as f32 + 0.5) * g.rh),
+                    l,
+                    a,
+                );
+            }
+        });
 }
 
 #[cfg(test)]
@@ -264,7 +352,12 @@ mod tests {
     use super::*;
 
     fn m() -> Metrics {
-        Metrics { btn: 32.0, gap: 2.0, sep: 9.0, pad: 4.0 }
+        Metrics {
+            btn: 32.0,
+            gap: 2.0,
+            sep: 9.0,
+            pad: 4.0,
+        }
     }
 
     #[test]
@@ -283,7 +376,10 @@ mod tests {
         let room = 4.0 + 3.0 * 32.0 + 2.0 * 9.0 + 4.0;
         let (cells, rules, size) = layout(&groups, &m(), room);
         assert!(size.x <= room, "{size:?}");
-        assert!(cells.iter().map(|c| c.top()).fold(0.0f32, f32::max) > 4.0, "wrapped onto a second row");
+        assert!(
+            cells.iter().map(|c| c.top()).fold(0.0f32, f32::max) > 4.0,
+            "wrapped onto a second row"
+        );
         for (i, a) in cells.iter().enumerate() {
             assert!(a.right() <= size.x - 4.0 + 0.01 && a.bottom() <= size.y - 4.0 + 0.01);
             for b in &cells[i + 1..] {
@@ -292,7 +388,11 @@ mod tests {
         }
         // No rule sits at the start of a row.
         for (x, row) in rules {
-            assert!(cells.iter().any(|c| (c.top() - (4.0 + row as f32 * 34.0)).abs() < 0.1 && c.right() < x));
+            assert!(
+                cells
+                    .iter()
+                    .any(|c| (c.top() - (4.0 + row as f32 * 34.0)).abs() < 0.1 && c.right() < x)
+            );
         }
     }
 }

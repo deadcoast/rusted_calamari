@@ -22,7 +22,13 @@ pub const RUST_HI: Rgb = (0xe3, 0x88, 0x4a);
 pub const STEEL: Rgb = (0xa9, 0xbc, 0xd0);
 
 pub fn fg(c: Rgb, bold: bool) -> String {
-    format!("\x1b[{}38;2;{};{};{}m", if bold { "1;" } else { "" }, c.0, c.1, c.2)
+    format!(
+        "\x1b[{}38;2;{};{};{}m",
+        if bold { "1;" } else { "" },
+        c.0,
+        c.1,
+        c.2
+    )
 }
 pub const RESET: &str = "\x1b[0m";
 

@@ -9,7 +9,7 @@ use eframe::egui;
 use octo::ops::{self, Op};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
 pub struct Done {
@@ -33,19 +33,31 @@ impl Saver {
         thread::spawn(move || {
             let mut held: VecDeque<(PathBuf, Vec<Op>)> = VecDeque::new();
             loop {
-                let Some((path, ops)) = held.pop_front().or_else(|| jobs.recv().ok()) else { return };
+                let Some((path, ops)) = held.pop_front().or_else(|| jobs.recv().ok()) else {
+                    return;
+                };
                 // A decoder or encoder that panics fails this write, not the queue.
-                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ops::save_ops(&path, &ops)))
-                    .unwrap_or_else(|_| Err("the write failed unexpectedly".into()));
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ops::save_ops(&path, &ops)
+                }))
+                .unwrap_or_else(|_| Err("the write failed unexpectedly".into()));
                 let failed = res.is_err();
-                if done.send(Done { path: path.clone(), ops, res }).is_err() {
+                if done
+                    .send(Done {
+                        path: path.clone(),
+                        ops,
+                        res,
+                    })
+                    .is_err()
+                {
                     return;
                 }
                 if failed {
                     // Later boxes on this file were drawn on the cut that
                     // didn't land; writing them would cut the wrong place.
                     held.extend(jobs.try_iter());
-                    let (same, rest): (Vec<_>, Vec<_>) = held.drain(..).partition(|(p, _)| *p == path);
+                    let (same, rest): (Vec<_>, Vec<_>) =
+                        held.drain(..).partition(|(p, _)| *p == path);
                     held.extend(rest);
                     for (p, ops) in same {
                         let res = Err("an earlier crop of this file didn't go through".to_string());
@@ -57,7 +69,11 @@ impl Saver {
                 ctx.request_repaint();
             }
         });
-        Saver { tx, rx, busy: HashMap::new() }
+        Saver {
+            tx,
+            rx,
+            busy: HashMap::new(),
+        }
     }
 
     pub fn submit(&mut self, path: PathBuf, ops: Vec<Op>) {
@@ -78,7 +94,11 @@ impl Saver {
     pub fn poll(&mut self, wait: bool) -> Vec<Done> {
         let mut out = Vec::new();
         loop {
-            let next = if wait && !self.busy.is_empty() { self.rx.recv().ok() } else { self.rx.try_recv().ok() };
+            let next = if wait && !self.busy.is_empty() {
+                self.rx.recv().ok()
+            } else {
+                self.rx.try_recv().ok()
+            };
             let Some(d) = next else { break };
             if let Some(n) = self.busy.get_mut(&d.path) {
                 *n -= 1;

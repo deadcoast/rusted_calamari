@@ -15,7 +15,10 @@ pub const ICON_FILL: &str = "ph-fill";
 
 /// An icon font at `size` points; `fill` picks the solid cut.
 pub fn icon(size: f32, fill: bool) -> FontId {
-    FontId::new(size, FontFamily::Name((if fill { ICON_FILL } else { ICON_BOLD }).into()))
+    FontId::new(
+        size,
+        FontFamily::Name((if fill { ICON_FILL } else { ICON_BOLD }).into()),
+    )
 }
 
 pub struct Face {
@@ -25,7 +28,10 @@ pub struct Face {
 
 macro_rules! face {
     ($name:literal, $file:literal) => {
-        Face { name: $name, bytes: include_bytes!(concat!("../assets/fonts/", $file)) }
+        Face {
+            name: $name,
+            bytes: include_bytes!(concat!("../assets/fonts/", $file)),
+        }
     };
 }
 
@@ -51,13 +57,24 @@ pub const SIZES: [f32; 6] = [12.0, 16.0, 20.0, 24.0, 28.0, 32.0];
 pub fn install(ctx: &egui::Context, sel: usize) {
     let mut defs = FontDefinitions::default();
     let face = &FACES[sel % FACES.len()];
-    defs.font_data.insert(face.name.to_owned(), Arc::new(FontData::from_static(face.bytes)));
+    defs.font_data.insert(
+        face.name.to_owned(),
+        Arc::new(FontData::from_static(face.bytes)),
+    );
     for fam in [FontFamily::Monospace, FontFamily::Proportional] {
-        defs.families.entry(fam).or_default().insert(0, face.name.to_owned());
+        defs.families
+            .entry(fam)
+            .or_default()
+            .insert(0, face.name.to_owned());
     }
-    for (name, bytes) in [(ICON_BOLD, egui_phosphor::bytes::bold::FONT), (ICON_FILL, egui_phosphor::bytes::fill::FONT)] {
-        defs.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
-        defs.families.insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
+    for (name, bytes) in [
+        (ICON_BOLD, egui_phosphor::bytes::bold::FONT),
+        (ICON_FILL, egui_phosphor::bytes::fill::FONT),
+    ] {
+        defs.font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+        defs.families
+            .insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
     }
     ctx.set_fonts(defs);
 }
