@@ -4,8 +4,7 @@ A retro image browser and organizer, written in Rust. The image fills the
 window. Beside it, the **Octobrachial Tree Format (OTF)** draws your folders
 and categories as a CP437 (the IBM PC's original character set) tree, much as
 Graph View draws an Obsidian vault. One key moves the image in view into a
-category folder. Every other control stays hidden until the pointer goes
-looking for it.
+category folder.
 
 Spec for the tree and the interface: [`OCTOBRACHIAL_TREE_FORMAT.md`](OCTOBRACHIAL_TREE_FORMAT.md).
 
