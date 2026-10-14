@@ -166,6 +166,25 @@ has no click highlight. When the open folder changes without a tree click
 
 ## 6. Inside Rusted Calamari
 
+The left dock contains two independent OTF widgets: **Favourites** above
+and **Files** below, separated by a subtle resizable rule. Favourites is
+the established library/category projection described above. Files is a
+read-only directory projection: folders use bracketed labels, files use a
+dot and optional size, links use a tilde, and the mantle remains a plain
+steel `○` with muted brackets. Category-looking directory names remain
+ordinary folders. It shares the renderer, styles, reflow, eight-arm limit,
+ink paging and tide fitting; it loads only requested directories.
+
+Each content controller moves between its dock slot and a native window.
+With one detached the other fills the dock; returning restores the saved
+split. Drag a header out, or back over the left dock to snap in. Shift-click
+the hover header toggles placement while retaining detached geometry.
+Both detached means the main dock is folded. Only that state enables a
+triple-click on the fold tab to recall the pair; a subsequent triple-click
+restores their prior detached positions. Ordinary folding and image focus
+continue to act on the main dock. See `UX-CONTRACT.md` for transition and
+persistence rules, and the README for filesystem controls.
+
 The window is an image browser and organizer in one: the image takes every
 pixel the layout can give it; everything else is chrome that arrives on
 hover and leaves on the next keystroke. The window has no system frame.

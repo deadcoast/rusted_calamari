@@ -44,14 +44,13 @@ impl App {
         if let Some(smoke) = &mut self.smoke
             && class == egui::ViewportClass::Immediate
             && ctx.input(|i| i.viewport().inner_rect.is_some())
+            && smoke.native_seen.insert(widget.index())
         {
-            if smoke.native_seen.insert(widget.index()) {
-                smoke.report.push(format!(
-                    "{}: {:?}",
-                    widget.title(),
-                    ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect))
-                ));
-            }
+            smoke.report.push(format!(
+                "{}: {:?}",
+                widget.title(),
+                ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect))
+            ));
         }
     }
 
@@ -222,7 +221,44 @@ impl App {
                 capture(&mut smoke, "09-narrow-boxed", None);
             }
             18 => {
-                smoke.report.push("PASS: actual native windows, one-widget fill, folding/image focus, pair recall/restore with exact geometry, native relocation/snap, unavailable-folder rendering, narrow boxed layout.".into());
+                self.files
+                    .start(ctx, self.lib.as_ref().unwrap().tree.root.join("empty"));
+            }
+            19 => {
+                assert!(
+                    self.files.browser.as_ref().unwrap().tree.nodes[0]
+                        .kids
+                        .is_empty()
+                );
+                capture(&mut smoke, "10-empty-folder", None);
+            }
+            20 => {
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1200.0, 850.0)));
+                self.files
+                    .start(ctx, self.lib.as_ref().unwrap().tree.root.join("many"));
+            }
+            21 => {
+                assert_eq!(
+                    self.files.browser.as_ref().unwrap().tree.nodes[0]
+                        .kids
+                        .len(),
+                    22
+                );
+                capture(&mut smoke, "11-overflow-pages", None);
+            }
+            22 => {
+                self.s.pin_ui = false;
+                self.s.style = 1;
+                self.s.panel_w = Some(750.0);
+                self.files
+                    .start(ctx, self.lib.as_ref().unwrap().tree.root.clone());
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1200.0, 850.0)));
+            }
+            23 => {
+                capture(&mut smoke, "12-unpinned-beak", None);
+            }
+            24 => {
+                smoke.report.push("PASS: actual native windows, one-widget fill, folding/image focus, pair recall/restore with exact geometry, native relocation/snap, unavailable/empty/populated folders, overflow pages, narrow boxed and unpinned beak layouts.".into());
                 smoke.report.push("Input boundary: triple-click and Shift-click are covered by egui event tests. OS pointer drag and mixed-DPI/multi-monitor input were not exercised; Computer Use native pipe was unavailable. Root screenshots were captured; eframe Glow does not return immediate-child screenshots.".into());
                 std::fs::write(smoke.out.join("RESULT.txt"), smoke.report.join("\n")).unwrap();
                 ctx.send_viewport_cmd(ViewportCommand::Close);

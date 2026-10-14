@@ -3,13 +3,14 @@ version: alpha
 name: Rusted Calamari
 description: An image-first desktop workspace with movable CP437 Octobrachial trees.
 colors:
+  primary: "#A9BCD0"
   stage: "#17181A"
   panel: "#1C1D20"
   iron: "#25272B"
   edge: "#62656B"
   text: "#DDD8CC"
   muted: "#8E8B84"
-  steel: "#A9BCD0"
+  steel: "{colors.primary}"
   rust: "#B2522A"
   favourite: "#F0A35E"
 typography:
@@ -22,10 +23,32 @@ omitted:
   - section: spacing
     reason: Native layout uses measured character cells and rows, not CSS lengths.
 components:
-  tree: {}
-  widgetHeader: {}
-  dock: {}
-  dialog: {}
+  stage:
+    backgroundColor: "{colors.stage}"
+  tree:
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.text}"
+    typography: "{typography.mono}"
+  treeRoot:
+    textColor: "{colors.steel}"
+  treeBrackets:
+    textColor: "{colors.muted}"
+  favourite:
+    textColor: "{colors.favourite}"
+  widgetHeader:
+    backgroundColor: "{colors.iron}"
+    textColor: "{colors.text}"
+  dockDivider:
+    backgroundColor: "{colors.edge}"
+  dockPreview:
+    backgroundColor: "{colors.primary}"
+  dialog:
+    backgroundColor: "{colors.iron}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.DEFAULT}"
+  dialogAction:
+    textColor: "{colors.rust}"
+    rounded: "{rounded.control}"
 ---
 
 # Rusted Calamari Design System

@@ -323,7 +323,7 @@ pub fn arms(t: &Tree, id: usize, active: bool) -> (Vec<usize>, usize, usize, usi
 
 fn suckers(files: &[FileEntry], cells_max: usize) -> Vec<Span> {
     let files: Vec<Option<usize>> = files.iter().map(|f| f.cat).collect();
-    let key = |c: &Option<usize>| c.map_or(usize::MAX, |x| x);
+    let key = |c: &Option<usize>| c.unwrap_or(usize::MAX);
     let cells: Vec<Option<usize>> = if files.len() <= cells_max {
         let mut f = files.clone();
         f.sort_by_key(key);

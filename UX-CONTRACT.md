@@ -11,7 +11,7 @@ Visual roles and runtime token owners are in `DESIGN.md`.
 | Tree rendering | `src/layout.rs`, `src/paint.rs`, `src/glyph.rs` | OTF specification | Existing category labels; filesystem labels | Existing OTF tests and filesystem tests |
 | File navigation | `src/fsbrowser.rs`, `src/browserpane.rs` | Full-filesystem request | Paths, drives, parent, back/forward | Real directory fixtures, stale/error/refresh tests |
 | Image focus | `src/focus.rs`, main application layout | Existing README | Fit, Large, Full | Existing sizing tests and workspace smoke |
-| Unsaved edits | `src/app.rs` shared unsaved dialog | Existing edit/save contract | Quit; open another library | Cancel/save/discard navigation checks |
+| Unsaved edits | `src/app.rs` shared unsaved dialog | Existing edit/save contract | Quit; open another library | Cancel/save navigation checks |
 
 Each widget has one content controller, regardless of its host. Detaching
 and docking must preserve favourites scroll/click state, Files root,

@@ -421,6 +421,7 @@ pub struct App {
     float_drags: [Option<workspace::FloatDrag>; 2],
     fold_clicks: FoldClicks,
     fold_action: Option<Act>,
+    widget_keys: Vec<Event>,
     main_rect: Option<Rect>,
     snap_zone: Option<Rect>,
     next_library: Option<(PathBuf, Option<PathBuf>)>,
@@ -505,6 +506,7 @@ impl App {
             float_drags: [None, None],
             fold_clicks: FoldClicks::default(),
             fold_action: None,
+            widget_keys: Vec::new(),
             main_rect: None,
             snap_zone: None,
             next_library: None,
@@ -2184,8 +2186,12 @@ impl App {
     }
 
     fn keys(&mut self, ctx: &egui::Context, now: f64) {
+        if self.s.tree && !self.s.dock.floating(Widget::Files) {
+            self.files.keys(ctx);
+        }
         let typing = self.typed || ctx.memory(|m| m.focused().is_some());
-        let events = ctx.input(|i| i.events.clone());
+        let mut events = ctx.input(|i| i.events.clone());
+        events.append(&mut self.widget_keys);
         for ev in events {
             let Event::Key {
                 key,
@@ -4365,9 +4371,6 @@ impl eframe::App for App {
                     .is_some_and(|p| self.img_rect.is_some_and(|r| r.contains(p)))
         }) {
             self.files.focused = false;
-        }
-        if !self.s.dock.floating(Widget::Files) {
-            self.files.keys(&ctx);
         }
         self.keys(&ctx, now);
         if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {

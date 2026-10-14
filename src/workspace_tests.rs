@@ -178,3 +178,138 @@ fn docked_widgets_render_at_small_and_large_sizes() {
         assert!(!output.shapes.is_empty());
     }
 }
+
+#[test]
+fn dragging_a_docked_header_out_detaches_and_preserves_split() {
+    let (ctx, mut app, _) = app("drag");
+    app.main_rect = Some(Rect::from_min_size(
+        Pos2::new(100.0, 100.0),
+        Vec2::new(1200.0, 800.0),
+    ));
+    app.snap_zone = Some(Rect::from_min_size(
+        Pos2::new(100.0, 100.0),
+        Vec2::new(400.0, 800.0),
+    ));
+    app.s.dock.split = 0.42;
+    let bounds = Rect::from_min_size(Pos2::new(10.0, 80.0), Vec2::new(400.0, 300.0));
+    let start = Pos2::new(120.0, 92.0);
+    let end = Pos2::new(700.0, 160.0);
+    let events = [
+        vec![],
+        vec![Event::PointerMoved(start)],
+        pointer(start, true, Modifiers::NONE),
+        vec![Event::PointerMoved(end)],
+        pointer(end, false, Modifiers::NONE),
+    ];
+    for (step, events) in events.into_iter().enumerate() {
+        let now = step as f64 * 0.1;
+        let _ = ctx.run_ui(input(now, events, Modifiers::NONE), |ui| {
+            let g = Grid::new(&ctx, 20.0);
+            app.widget_header(ui, Widget::Favourites, bounds, &g, false, now);
+        });
+    }
+    assert!(app.s.dock.floating(Widget::Favourites));
+    assert_eq!(app.s.dock.docked_count(), 1);
+    assert_eq!(app.s.dock.split, 0.42);
+    assert_eq!(
+        app.s.dock.widgets[0].geometry.unwrap().position,
+        [690.0, 248.0]
+    );
+}
+
+#[test]
+fn settings_load_legacy_and_round_trip_widget_geometry() {
+    #[derive(Default)]
+    struct Store(HashMap<String, String>);
+    impl eframe::Storage for Store {
+        fn get_string(&self, k: &str) -> Option<String> {
+            self.0.get(k).cloned()
+        }
+        fn set_string(&mut self, k: &str, v: String) {
+            self.0.insert(k.into(), v);
+        }
+        fn remove_string(&mut self, k: &str) {
+            self.0.remove(k);
+        }
+        fn flush(&mut self) {}
+    }
+    let mut store = Store::default();
+    store.0.insert(
+        "settings".into(),
+        "(font: 3, tree: false, image: true)".into(),
+    );
+    let mut settings: Settings = eframe::get_value(&store, "settings").unwrap();
+    assert_eq!(settings.font, 3);
+    assert!(!settings.tree);
+    assert_eq!(settings.dock.docked_count(), 2);
+    assert!(settings.files_root.is_none());
+    let geometry = crate::dock::Geometry {
+        position: [-500.0, 100.0],
+        size: [480.0, 620.0],
+    };
+    settings.dock.detach(Widget::Files, geometry);
+    settings.dock.split = 0.35;
+    settings.files_root = Some(PathBuf::from("C:/"));
+    eframe::set_value(&mut store, "settings", &settings);
+    let restored: Settings = eframe::get_value(&store, "settings").unwrap();
+    assert!(restored.dock.floating(Widget::Files));
+    assert_eq!(restored.dock.widgets[1].geometry, Some(geometry));
+    assert_eq!(restored.dock.split, 0.35);
+    assert_eq!(restored.files_root, settings.files_root);
+}
+
+#[test]
+fn floating_files_consume_navigation_and_forward_app_keys_to_root() {
+    let (ctx, mut app, _) = app("widget-keys");
+    app.files.focused = true;
+    let events = [Key::ArrowDown, Key::Tab]
+        .into_iter()
+        .map(|key| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        })
+        .collect();
+    let _ = ctx.run_ui(input(1.0, events, Modifiers::NONE), |_| {
+        app.files.keys(&ctx);
+        app.widget_shortcuts(&ctx);
+    });
+    assert_eq!(app.widget_keys.len(), 1);
+    assert!(matches!(
+        app.widget_keys[0],
+        Event::Key { key: Key::Tab, .. }
+    ));
+    assert!(app.s.tree, "root action must wait for the root frame");
+    let _ = ctx.run_ui(input(1.1, vec![], Modifiers::NONE), |_| app.keys(&ctx, 1.1));
+    assert!(!app.s.tree);
+    assert!(app.widget_keys.is_empty());
+}
+
+#[test]
+fn folded_files_do_not_consume_image_navigation() {
+    let (ctx, mut app, root) = app("folded-keys");
+    std::fs::copy(root.join("a.png"), root.join("c.png")).unwrap();
+    assert!(app.open_library(&root, 0.0));
+    app.files.focused = true;
+    app.s.tree = false;
+    for folded in [true, false] {
+        app.s.tree = !folded;
+        let event = Event::Key {
+            key: Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let _ = ctx.run_ui(input(1.0, vec![event], Modifiers::NONE), |_| {
+            app.keys(&ctx, 1.0)
+        });
+        assert_eq!(
+            app.lib.as_ref().unwrap().cursor,
+            1,
+            "folded Files must yield image keys; visible focused Files must consume them"
+        );
+    }
+}

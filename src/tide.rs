@@ -147,7 +147,7 @@ fn retract_order(t: &Tree, id: usize) -> Vec<usize> {
     }
     let mut v = Vec::new();
     walk(t, id, 1, &mut v);
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|a| std::cmp::Reverse(a.0));
     v.into_iter().map(|(_, k)| k).collect()
 }
 

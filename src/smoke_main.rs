@@ -21,6 +21,10 @@ fn main() -> eframe::Result {
         .nth(1)
         .map(PathBuf::from)
         .expect("Pass a fresh evidence directory");
+    assert!(
+        !out.exists(),
+        "Use a fresh directory to preserve earlier evidence"
+    );
     std::fs::create_dir_all(&out).unwrap();
     let root = out.join("fixture");
     for dir in ["", "_fav_", "1", "portraits", "empty", "many"] {

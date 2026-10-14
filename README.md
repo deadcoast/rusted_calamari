@@ -83,6 +83,52 @@ To update, run `cargo install --path .` again from the repo. To remove it, run
 To keep the bars on screen, turn on **PIN_UI** in Settings or choose View →
 Pin the interface.
 
+## Two Octobrachial trees
+
+**Favourites**, above, keeps the existing library/category tree and sorting
+hotkeys. **Files**, below, browses the full filesystem using the same OTF
+arms, folding and overflow pages. It starts at the library on first use and
+remembers its last location. Category names such as `_fav_` are ordinary
+folders in Files.
+
+Hover either widget's header and drag it out to make a separate native
+window. The remaining widget fills the dock. Drag the detached header back
+over the left dock and release to snap it into its original slot. The
+subtle horizontal divider changes the joined split. Detached windows can
+be resized from their edges.
+
+Shift-click a widget's hover header to toggle docked/floating placement;
+the header's `[>]` / `[<]` button and View menu offer the same action.
+Closing a detached widget docks it. Each widget remembers its last
+detached size and position separately from the joined split.
+
+`Tab` and the fold tab still fold the dock and give the image priority.
+Detached widgets stay available. With both detached, the main window acts
+folded: **triple-click the fold tab** to recall both, then triple-click again
+to restore their detached positions. The gesture cannot detach an ordinary
+joined or mixed layout.
+
+In **Files**:
+
+- Click a folder to expand/fold it; double-click or press `Enter` to make it
+  the browsing root. Click media to preview it. Other files show details
+  and are never launched. Click the `~[ink ...]` row to cycle overflow pages.
+- The toolbar offers Back, Forward, Parent, Refresh, Path, Drives, Library
+  and View images. Hover a glyph for its label and shortcut. `V` in this
+  toolbar opens the selected folder as the image library.
+- When Files has focus, arrows navigate its tree; `Home`/`End` and
+  `PageUp`/`PageDown` move selection. `Enter` on the ink row advances its
+  page. `Backspace` or `Alt+Up` goes to the parent; `Alt+Left`/`Alt+Right`
+  traverse history, `Ctrl+L` edits the path and `F5` refreshes.
+- Folder browsing leaves the image library in place. Previewing media
+  outside it opens that media's parent as a library; pending image edits
+  use Save/Open without saving/Cancel. Sorting hotkeys keep their existing
+  meaning except while typing a path.
+
+Folder listings load on demand in the background. Unreadable folders show
+an error and can be refreshed. Links are followed only when explicitly
+opened as a new browsing root. Refresh after changes made outside the app.
+
 ## Keys
 
 | Key | Does |
@@ -215,14 +261,29 @@ no decoder for them yet.
 cargo test --release
 ```
 
-The tests cover the tree layout and click engine, file operations
-(move/undo, rotate/restore, export), image focus sizing and the toolbar
-layout.
+The tests cover the tree layout and click engine, filesystem loading and
+keyboard paging, docking/recall gestures, settings compatibility, unsaved
+edits, file operations, image focus sizing and toolbar layout.
+
+For an isolated native-window smoke run with screenshots, use a fresh
+output directory:
+
+```sh
+cargo run --release --features workspace-smoke --bin calamari-workspace-smoke -- target/workspace-smoke-check
+```
+
+This exercises actual native placement and rendering through application
+actions. It does not inject physical mouse input. The current evidence and
+remaining native-input checks are in
+[`docs/verification/workspace-2026-10-13.md`](docs/verification/workspace-2026-10-13.md).
 
 ```txt
 src/
   main.rs       window setup (borderless)
   app.rs        the viewer: stage, tree pane, menus, dialogs, keys, undo/redo
+  dock.rs       widget placement, split and gated pair recall/restore
+  workspace.rs  dock/native hosts, dragging and shared library actions
+  browserpane.rs Files widget controls, navigation and OTF presentation
   focus.rs      image focus: the window shaped round the picture
   theme.rs      shared frames, menus, dialogs
   toolbar.rs    the tool strip: registry, layout, animated buttons
@@ -235,6 +296,7 @@ src/
 
   lib.rs        the OTF library, `octo`, used by the app and the tests:
   tree.rs       folder tree and category table
+  fsbrowser.rs  lazy read-only filesystem tree and background listings
   layout.rs     tree -> glyph lines, reflow, row keys
   tide.rs       click fitting: mirror, slide, retract
   paint.rs      token colours

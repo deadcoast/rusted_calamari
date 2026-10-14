@@ -36,6 +36,8 @@ pub struct Files {
     focus_address: bool,
     drives_open: bool,
     keyboard: Vec<Key>,
+    ink_focus: Option<usize>,
+    fit_after_load: Vec<(u64, usize)>,
 }
 
 impl Default for Files {
@@ -56,6 +58,8 @@ impl Default for Files {
             focus_address: false,
             drives_open: false,
             keyboard: Vec::new(),
+            ink_focus: None,
+            fit_after_load: Vec::new(),
         }
     }
 }
@@ -186,11 +190,38 @@ impl Files {
             Load::Unloaded | Load::Error(_) => {
                 b.tree.nodes[id].open = true;
                 b.load(id);
+                self.fit_after_load.push((b.generation, id));
             }
             _ => {
                 tide::click(&mut b.tree, &mut self.view, style, cx, id, false);
             }
         }
+    }
+
+    /// Lazy expansion has no children to measure until the worker replies.
+    /// Once ready, use the same pin/mirror/slide/retract pass as a warm click.
+    fn fit_loaded(&mut self, style: Style, cx: &Ctx) -> bool {
+        let Some(b) = &mut self.browser else {
+            return false;
+        };
+        let mut changed = false;
+        self.fit_after_load.retain(|&(generation, id)| {
+            if generation != b.generation {
+                return false;
+            }
+            if b.entries[id].load == Load::Loading {
+                return true;
+            }
+            if b.entries[id].load == Load::Ready && b.tree.nodes[id].open {
+                b.tree.nodes[id].open = false;
+                tide::click(&mut b.tree, &mut self.view, style, cx, id, false);
+                // Empty directories still remain visibly expanded.
+                b.tree.nodes[id].open = true;
+                changed = true;
+            }
+            false
+        });
+        changed
     }
 
     fn activate(&mut self, id: usize) -> Option<Action> {
@@ -221,40 +252,70 @@ impl Files {
         for key in std::mem::take(&mut self.keyboard) {
             let b = self.browser.as_mut()?;
             let generation = b.generation;
-            let visible: Vec<usize> = frame
+            let visible: Vec<(usize, bool, usize)> = frame
                 .lines
                 .iter()
-                .flat_map(|l| l.heads.iter().copied())
+                .enumerate()
+                .flat_map(|(row, l)| {
+                    l.heads.iter().map(move |&id| (id, false, row)).chain(
+                        l.tags
+                            .first()
+                            .filter(|_| l.kind == Kind::Ink)
+                            .map(move |&id| (id, true, row)),
+                    )
+                })
                 .collect();
-            let index = visible.iter().position(|&n| n == b.selected).unwrap_or(0);
+            if visible.is_empty() {
+                continue;
+            }
+            let index = visible
+                .iter()
+                .position(|&(id, ink, _)| id == b.selected && ink == (self.ink_focus == Some(id)))
+                .unwrap_or(0);
             let mut selected = b.selected;
+            let mut ink = self.ink_focus == Some(selected);
+            let mut target = None;
             match key {
-                Key::ArrowDown => {
-                    selected = visible[(index + 1).min(visible.len().saturating_sub(1))]
-                }
-                Key::ArrowUp => selected = visible[index.saturating_sub(1)],
-                Key::Home => selected = visible[0],
-                Key::End => selected = *visible.last().unwrap_or(&0),
+                Key::ArrowDown => target = Some((index + 1).min(visible.len() - 1)),
+                Key::ArrowUp => target = Some(index.saturating_sub(1)),
+                Key::Home => target = Some(0),
+                Key::End => target = Some(visible.len() - 1),
                 Key::PageDown => {
-                    self.view.scroll = (self.view.scroll + self.view.rows)
-                        .min(frame.lines.len().saturating_sub(self.view.rows))
+                    let row = visible[index].2 + self.view.rows;
+                    target = Some(
+                        visible
+                            .iter()
+                            .position(|v| v.2 >= row)
+                            .unwrap_or(visible.len() - 1),
+                    );
                 }
-                Key::PageUp => self.view.scroll = self.view.scroll.saturating_sub(self.view.rows),
+                Key::PageUp => {
+                    let row = visible[index].2.saturating_sub(self.view.rows);
+                    target = Some(visible.iter().rposition(|v| v.2 <= row).unwrap_or(0));
+                }
                 Key::Backspace => b.go_up(),
                 Key::ArrowLeft => {
-                    if b.tree.nodes[selected].open && selected != 0 {
+                    if ink {
+                        ink = false;
+                    } else if b.tree.nodes[selected].open && selected != 0 {
                         b.tree.nodes[selected].open = false;
                     } else {
                         selected = b.tree.nodes[selected].parent.unwrap_or(0);
                     }
                 }
                 Key::ArrowRight => {
-                    if b.tree.nodes[selected].open && !b.tree.nodes[selected].kids.is_empty() {
-                        selected = b.tree.nodes[selected].kids[0];
+                    if ink {
+                        self.toggle(selected, true, style, cx);
+                    } else if b.tree.nodes[selected].open && !b.tree.nodes[selected].kids.is_empty()
+                    {
+                        target = visible.iter().position(|&(id, ink, _)| {
+                            !ink && b.tree.nodes[id].parent == Some(selected)
+                        });
                     } else {
                         self.toggle(selected, false, style, cx);
                     }
                 }
+                Key::Enter if ink => self.toggle(selected, true, style, cx),
                 Key::Enter => action = self.activate(selected),
                 _ => {}
             }
@@ -262,10 +323,19 @@ impl Files {
             if b.generation != generation {
                 break;
             }
+            if let Some(index) = target {
+                (selected, ink, _) = visible[index];
+            }
+            self.ink_focus = ink.then_some(selected);
             if selected < b.entries.len() {
                 b.selected = selected;
             }
-            if let Some(row) = frame.row(selected) {
+            let row = if ink {
+                frame.ink_row(selected)
+            } else {
+                frame.row(selected)
+            };
+            if let Some(row) = row {
                 if row < self.view.scroll {
                     self.view.scroll = row;
                 } else if row >= self.view.scroll + self.view.rows {
@@ -287,15 +357,14 @@ impl Files {
     ) -> Option<Action> {
         let ctx = ui.ctx().clone();
         let mut action = None;
-        if self.browser.is_none() {
-            return None;
-        }
+        self.browser.as_ref()?;
         let generation = self.browser.as_ref().unwrap().generation;
         if self.generation != generation {
             self.generation = generation;
             self.motion.reset();
             self.view.scroll = 0;
             self.dx = 0.0;
+            self.ink_focus = None;
         }
         let nav = Rect::from_min_size(
             rect.min + Vec2::new(g.cw, 0.0),
@@ -418,12 +487,23 @@ impl Files {
         self.view.rows = rows;
         let cols = ((tree_rect.width() - g.cw * 2.0) / g.cw).floor().max(8.0) as usize;
         let (frame, cx) = self.browser.as_ref().unwrap().frame(style, cols);
+        let (frame, cx) = if self.fit_loaded(style, &cx) {
+            self.browser.as_ref().unwrap().frame(style, cols)
+        } else {
+            (frame, cx)
+        };
+        let had_keyboard = !self.keyboard.is_empty();
         action = self.keyboard_actions(&frame, &cx, style).or(action);
         // Navigation may have replaced the arena while handling Enter/Back.
         if self.browser.as_ref().unwrap().generation != generation {
             ctx.request_repaint();
             return action;
         }
+        let (frame, cx) = if had_keyboard {
+            self.browser.as_ref().unwrap().frame(style, cols)
+        } else {
+            (frame, cx)
+        };
         let b = self.browser.as_ref().unwrap();
         self.view.scroll = self.view.scroll.min(frame.lines.len().saturating_sub(rows));
         let resp = ui.interact(tree_rect, Id::new("file-tree"), Sense::CLICK | Sense::DRAG);
@@ -458,6 +538,18 @@ impl Files {
                 _ => continue,
             };
             let y = origin.y + d.y * g.rh;
+            if self.focused
+                && line.kind == Kind::Ink
+                && line.tags.first().copied() == self.ink_focus
+            {
+                p.line_segment(
+                    [
+                        Pos2::new(origin.x, y + g.rh - 1.0),
+                        Pos2::new(origin.x + line.width() as f32 * g.cw, y + g.rh - 1.0),
+                    ],
+                    Stroke::new(1.0, theme::MUTED),
+                );
+            }
             if d.idx.is_some()
                 && let Some(q) = resp.hover_pos().filter(|q| q.y >= y && q.y < y + g.rh)
             {
@@ -494,6 +586,7 @@ impl Files {
         {
             self.focused = true;
             self.browser.as_mut().unwrap().selected = id;
+            self.ink_focus = ink.then_some(id);
             if ink {
                 self.toggle(id, true, style, &cx);
             } else if resp.double_clicked() {
@@ -534,5 +627,108 @@ impl Files {
         ui.interact(footer, Id::new("file-details"), Sense::hover())
             .on_hover_text(text);
         action
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn files(tag: &str) -> Files {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-file-keys")
+            .join(format!("{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for i in 0..22 {
+            std::fs::write(root.join(format!("note-{i:02}.txt")), "test").unwrap();
+        }
+        let mut files = Files::default();
+        files.start(&egui::Context::default(), root);
+        ready(&mut files);
+        files
+    }
+
+    fn ready(files: &mut Files) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while files.browser.as_ref().unwrap().loading() && Instant::now() < deadline {
+            files.poll();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!files.browser.as_ref().unwrap().loading());
+    }
+
+    fn key(files: &mut Files, key: Key) {
+        let (frame, cx) = files.browser.as_ref().unwrap().frame(Style::Arm, 80);
+        files.keyboard.push(key);
+        files.keyboard_actions(&frame, &cx, Style::Arm);
+    }
+
+    #[test]
+    fn keyboard_reaches_ink_and_pages_to_every_file() {
+        let mut files = files("ink");
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..4 {
+            let (frame, _) = files.browser.as_ref().unwrap().frame(Style::Arm, 80);
+            seen.extend(
+                frame
+                    .lines
+                    .iter()
+                    .flat_map(|l| l.heads.iter().copied())
+                    .filter(|&id| id != 0),
+            );
+            key(&mut files, Key::End);
+            assert_eq!(files.ink_focus, Some(0));
+            key(&mut files, Key::Enter);
+        }
+        assert_eq!(seen.len(), 22);
+        key(&mut files, Key::Home);
+        key(&mut files, Key::ArrowRight);
+        let b = files.browser.as_ref().unwrap();
+        assert!(b.frame(Style::Arm, 80).0.row(b.selected).is_some());
+        assert_ne!(b.selected, 0);
+        assert_eq!(files.ink_focus, None);
+    }
+
+    #[test]
+    fn page_keys_move_selection_and_view_together() {
+        let mut files = files("pages");
+        files.view.rows = 3;
+        key(&mut files, Key::PageDown);
+        assert_ne!(files.browser.as_ref().unwrap().selected, 0);
+        assert!(files.view.scroll > 0);
+        key(&mut files, Key::PageUp);
+        assert_eq!(files.browser.as_ref().unwrap().selected, 0);
+        assert_eq!(files.view.scroll, 0);
+    }
+
+    #[test]
+    fn first_lazy_expansion_uses_tide_to_mirror_at_the_bottom() {
+        let mut files = files("lazy-fit");
+        let root = files.browser.as_ref().unwrap().tree.root.clone();
+        for name in ["a", "b", "c", "d", "e", "z"] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+        }
+        for name in ["one.txt", "two.txt", "three.txt"] {
+            std::fs::write(root.join("z").join(name), "test").unwrap();
+        }
+        files.refresh();
+        ready(&mut files);
+        let b = files.browser.as_ref().unwrap();
+        let id = b.tree.nodes.iter().position(|n| n.name == "z").unwrap();
+        let (_, cx) = b.frame(Style::Arm, 80);
+        files.view.rows = 9;
+        files.toggle(id, false, Style::Arm, &cx);
+        ready(&mut files);
+        assert!(files.fit_loaded(Style::Arm, &cx));
+        let b = files.browser.as_ref().unwrap();
+        assert!(b.tree.nodes[id].open);
+        assert!(
+            b.tree.nodes[id]
+                .kids
+                .iter()
+                .all(|&k| b.tree.nodes[k].side == octo::tree::Side::Up)
+        );
+        assert!(files.fit_after_load.is_empty());
     }
 }

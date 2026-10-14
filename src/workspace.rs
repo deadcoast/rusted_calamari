@@ -98,7 +98,7 @@ impl App {
                 &p,
                 header.min + Vec2::new(g.cw, g.rh * 0.15),
                 w.title(),
-                MUTED,
+                TEXT,
                 alpha,
             );
             let glyph = if floating { "[<]" } else { "[>]" };
@@ -160,17 +160,16 @@ impl App {
             }
             if resp.drag_stopped()
                 && let Some(drag) = self.dock_drag.take()
+                && let Some(q) = ctx.input(|i| i.pointer.interact_pos())
             {
-                if let Some(q) = ctx.input(|i| i.pointer.interact_pos()) {
-                    let origin = self.main_rect.map_or(Vec2::ZERO, |r| r.min.to_vec2());
-                    let point = q + origin;
-                    if !self.snap_zone.is_some_and(|zone| zone.contains(point)) {
-                        let mut native = drag.rect.translate(q - drag.press + origin);
-                        native.max = native.min + native.size().max(Vec2::new(320.0, 240.0));
-                        self.s.dock.widgets[w.index()].geometry = Some(Geometry::from_rect(native));
-                        self.s.dock.detach(w, Geometry::from_rect(native));
-                        self.fold_clicks.reset();
-                    }
+                let origin = self.main_rect.map_or(Vec2::ZERO, |r| r.min.to_vec2());
+                let point = q + origin;
+                if !self.snap_zone.is_some_and(|zone| zone.contains(point)) {
+                    let mut native = drag.rect.translate(q - drag.press + origin);
+                    native.max = native.min + native.size().max(Vec2::new(320.0, 240.0));
+                    self.s.dock.widgets[w.index()].geometry = Some(Geometry::from_rect(native));
+                    self.s.dock.detach(w, Geometry::from_rect(native));
+                    self.fold_clicks.reset();
                 }
             }
         }
@@ -301,9 +300,12 @@ impl App {
                 ui.painter().rect_filled(full, 0.0, PANEL);
                 let g = Grid::new(&child, SIZES[self.s.size % SIZES.len()]);
                 if w == Widget::Files {
+                    if child.input(|i| i.focused) {
+                        self.files.focused = true;
+                    }
                     self.files.keys(&child);
                 }
-                self.widget_shortcuts(&child, now);
+                self.widget_shortcuts(&child);
                 let content = self.widget_header(ui, w, full.shrink(5.0), &g, true, now);
                 self.widget_content(ui, w, content, &g, now);
                 if class != egui::ViewportClass::EmbeddedWindow {
@@ -368,44 +370,22 @@ impl App {
         }
     }
 
-    fn widget_shortcuts(&mut self, ctx: &egui::Context, now: f64) {
+    pub(super) fn widget_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.egui_wants_keyboard_input() || !matches!(self.dialog, Dialog::None) {
             return;
         }
-        for event in ctx.input(|i| i.events.clone()) {
-            let Event::Key {
-                key,
-                pressed: true,
-                repeat: false,
-                modifiers,
-                ..
-            } = event
-            else {
-                continue;
-            };
-            if key == Key::Tab {
-                let root = self.egui.clone();
-                self.act(
-                    &root,
-                    if modifiers.shift {
-                        Act::Image
-                    } else {
-                        Act::Tree
-                    },
-                    now,
-                );
-            } else if !modifiers.command && !modifiers.alt {
-                if let Some(name) = Self::key_name(key)
-                    && let Some(cat) = self.lib.as_ref().and_then(|l| {
-                        l.tree
-                            .cats
-                            .iter()
-                            .position(|c| c.key.as_deref() == Some(&name))
-                    })
-                {
-                    self.classify(cat, now);
-                }
-            }
+        // Handle unconsumed application shortcuts on the next root frame.
+        // A Context clone still addresses the currently rendering viewport;
+        // executing here would send fullscreen/close commands to the widget.
+        self.widget_keys.extend(ctx.input(|i| {
+            i.events
+                .iter()
+                .filter(|event| matches!(event, Event::Key { pressed: true, .. }))
+                .cloned()
+                .collect::<Vec<_>>()
+        }));
+        if !self.widget_keys.is_empty() {
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
     }
 
