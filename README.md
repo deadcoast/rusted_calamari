@@ -393,9 +393,9 @@ separate verification work; see the [dated evidence and limitations](docs/verifi
 | Shared rendering and typography | [`src/theme.rs`](src/theme.rs), [`src/glyph.rs`](src/glyph.rs), [`src/fonts.rs`](src/fonts.rs), [`src/treeview.rs`](src/treeview.rs), [`src/toolbar.rs`](src/toolbar.rs) |
 | Integration tests and native smoke | [`tests/`](tests/), [`src/smoke_main.rs`](src/smoke_main.rs) |
 
-- [OTF specification](OCTOBRACHIAL_TREE_FORMAT.md): tree grammar and layout rules.
-- [Workspace behaviour](UX-CONTRACT.md): interaction and state contracts.
-- [Design system](DESIGN.md): visual roles, tokens and their code owners.
+- [OTF specification](docs/OCTOBRACHIAL_TREE_FORMAT.md): tree grammar and layout rules.
+- [Workspace behaviour](docs/UX-CONTRACT.md): interaction and state contracts.
+- [Design system](docs/DESIGN.md): visual roles, tokens and their code owners.
 - [Workspace verification](docs/verification/workspace-2026-10-13.md): results,
   evidence boundaries and outstanding native checks.
 
