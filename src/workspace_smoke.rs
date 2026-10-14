@@ -258,6 +258,44 @@ impl App {
                 capture(&mut smoke, "12-unpinned-beak", None);
             }
             24 => {
+                self.s.pin_ui = true;
+                self.s.style = 0;
+                self.s.panel_w = Some(450.0);
+                self.request_library(smoke.out.join("fixture/portraits"), None, now);
+            }
+            25 => {
+                assert!(!self.s.files_anchored);
+                assert_eq!(
+                    self.files.browser.as_ref().unwrap().tree.root,
+                    self.lib.as_ref().unwrap().tree.root
+                );
+                capture(&mut smoke, "13-unanchored-follows-open", None);
+            }
+            26 => {
+                self.toggle_files_anchor();
+                self.request_library(smoke.out.join("fixture"), None, now);
+            }
+            27 => {
+                assert!(self.s.files_anchored);
+                assert_eq!(
+                    self.files.browser.as_ref().unwrap().tree.root,
+                    self.lib.as_ref().unwrap().tree.root.join("portraits")
+                );
+                capture(&mut smoke, "14-anchored-keeps-folder", None);
+            }
+            28 => {
+                self.toggle_files_anchor();
+            }
+            29 => {
+                assert!(!self.s.files_anchored);
+                assert_eq!(
+                    self.files.browser.as_ref().unwrap().tree.root,
+                    self.lib.as_ref().unwrap().tree.root
+                );
+                capture(&mut smoke, "15-anchor-off-resumes-sync", None);
+            }
+            30 => {
+                smoke.report.push("PASS: Anchor off follows a successful app folder open; Anchor on retains its browser root across another open; turning Anchor off immediately resumes sync.".into());
                 smoke.report.push("PASS: actual native windows, one-widget fill, folding/image focus, pair recall/restore with exact geometry, native relocation/snap, unavailable/empty/populated folders, overflow pages, narrow boxed and unpinned beak layouts.".into());
                 smoke.report.push("Input boundary: triple-click and Shift-click are covered by egui event tests. OS pointer drag and mixed-DPI/multi-monitor input were not exercised; Computer Use native pipe was unavailable. Root screenshots were captured; eframe Glow does not return immediate-child screenshots.".into());
                 std::fs::write(smoke.out.join("RESULT.txt"), smoke.report.join("\n")).unwrap();

@@ -10,6 +10,7 @@ Visual roles and runtime token owners are in `DESIGN.md`.
 | Tree placement | `src/dock.rs`, `src/workspace.rs` | Two-widget request | Upper Favourites, lower Files; native floating | Dock transitions and runtime smoke |
 | Tree rendering | `src/layout.rs`, `src/paint.rs`, `src/glyph.rs` | OTF specification | Existing category labels; filesystem labels | Existing OTF tests and filesystem tests |
 | File navigation | `src/fsbrowser.rs`, `src/browserpane.rs` | Full-filesystem request | Paths, drives, parent, back/forward | Real directory fixtures, stale/error/refresh tests |
+| Folder following | `src/workspace.rs`, persisted `Settings::files_anchored` | User Anchor request, 2026-10-13 | Off follows app folders; on preserves Files location, in either host | Open/cancel/failure, startup, persistence and header input tests |
 | Image focus | `src/focus.rs`, main application layout | Existing README | Fit, Large, Full | Existing sizing tests and workspace smoke |
 | Unsaved edits | `src/app.rs` shared unsaved dialog | Existing edit/save contract | Quit; open another library | Cancel/save navigation checks |
 
@@ -35,7 +36,17 @@ both prior floating placements. Arbitrary triple-clicks in a normal joined
 or mixed layout cannot detach both widgets. Single/double clicks in the
 pair-eligible state must not move the button before a third click can land.
 
-Files starts at the saved browser location, or the library on first use.
+Anchor is off by default. Files follows successful application folder
+changes (hover menu/Ctrl+O, drops, Favourites browsing and image navigation
+to another folder). Sync happens after the app accepts the change, so
+cancellation, pending-edit prompts and failures cannot move Files early.
+Manual Files browsing is not reset on every repaint. Anchor on preserves
+its independent location across application navigation and launches;
+turning Anchor off immediately follows the current app folder. Both the
+setting and Files location are persisted independently of docking.
+Shift-click on header controls still toggles docking; an ordinary click on
+Anchor toggles following. With no library available, Files uses its saved
+location or the working directory.
 It can navigate any readable local, mounted or explicitly entered network
 path. Enumerating a folder does not recursively scan its descendants.
 Listings run on a background worker, with generation/request checks so an

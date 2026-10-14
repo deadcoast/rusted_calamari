@@ -131,6 +131,8 @@ pub struct Settings {
     pub library: Option<PathBuf>,
     pub dock: Dock,
     pub files_root: Option<PathBuf>,
+    /// Keep Files independent of the app's current image folder.
+    pub files_anchored: bool,
 }
 
 impl Default for Settings {
@@ -150,6 +152,7 @@ impl Default for Settings {
             library: None,
             dock: Dock::default(),
             files_root: None,
+            files_anchored: false,
         }
     }
 }
@@ -517,13 +520,17 @@ impl App {
         if let Some(p) = start {
             app.open_library(&p, 0.0);
         }
-        let files_root = app
-            .s
-            .files_root
-            .clone()
-            .or_else(|| app.s.library.clone())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        app.files.start(&ctx, files_root);
+        // A successful unanchored library open has already positioned Files.
+        // Anchored sessions keep their independently saved browser location.
+        if app.files.browser.is_none() {
+            let files_root = app
+                .s
+                .files_root
+                .clone()
+                .or_else(|| app.s.library.clone())
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            app.files.start(&ctx, files_root);
+        }
         app
     }
 
@@ -579,6 +586,7 @@ impl App {
                 self.pending.clear();
                 self.tree_hold = 0.0;
                 self.reset_view();
+                self.sync_files_to_folder();
                 true
             }
             Err(e) => {
@@ -961,11 +969,15 @@ impl App {
             return;
         };
         if lib.active != node || lib.cursor != i {
+            let changed_folder = lib.active != node;
             lib.active = node;
             lib.cursor = i;
             self.crop = None;
             self.quick = None;
             self.reset_view();
+            if changed_folder {
+                self.sync_files_to_folder();
+            }
         }
     }
 
@@ -1240,6 +1252,7 @@ impl App {
                     tide::click(&mut lib.tree, &mut self.view, style, &cx, id, false);
                 }
                 self.reset_view();
+                self.sync_files_to_folder();
             }
         }
     }
@@ -4081,6 +4094,10 @@ impl App {
             &mut rows,
             "Files",
             &[
+                (
+                    "anchor in hover header",
+                    "on: keep folder; off: follow the app",
+                ),
                 ("click a folder / file", "expand folder / preview media"),
                 ("double-click a folder", "browse it as the root"),
                 ("Ctrl+L / Alt+Up", "enter a path / parent folder"),

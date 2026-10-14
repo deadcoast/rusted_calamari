@@ -29,6 +29,24 @@ fn primary_down(ctx: &egui::Context) -> bool {
 }
 
 impl App {
+    /// Follow successful application folder changes, not every repaint.
+    /// Manual Files navigation remains usable until the app changes folder.
+    pub(super) fn sync_files_to_folder(&mut self) {
+        if !self.s.files_anchored
+            && let Some(lib) = &self.lib
+        {
+            self.files.start(&self.egui, lib.tree.dir(lib.active));
+        }
+    }
+
+    pub(super) fn toggle_files_anchor(&mut self) {
+        self.s.files_anchored = !self.s.files_anchored;
+        if !self.s.files_anchored {
+            self.sync_files_to_folder();
+        }
+        self.egui.request_repaint_of(egui::ViewportId::ROOT);
+    }
+
     fn fallback_geometry(&self, w: Widget) -> Geometry {
         let main = self.main_rect.unwrap_or(Rect::from_min_size(
             Pos2::new(100.0, 100.0),
@@ -58,7 +76,7 @@ impl App {
     }
 
     /// The title band reserves its space so appearing controls never move
-    /// tree rows. Shift-click anywhere on this hover menu toggles placement.
+    /// tree rows. Shift-click the title or dock button to toggle placement.
     pub(super) fn widget_header(
         &mut self,
         ui: &mut egui::Ui,
@@ -77,8 +95,22 @@ impl App {
             ),
             header.max,
         );
-        let drag_rect =
-            Rect::from_min_max(header.min, Pos2::new(button_rect.left(), header.bottom()));
+        let anchor_rect = (w == Widget::Files).then(|| {
+            Rect::from_min_max(
+                Pos2::new(
+                    (button_rect.left() - g.cw * 3.0).max(header.left()),
+                    header.top(),
+                ),
+                button_rect.left_bottom(),
+            )
+        });
+        let drag_rect = Rect::from_min_max(
+            header.min,
+            Pos2::new(
+                anchor_rect.map_or(button_rect.left(), |r| r.left()),
+                header.bottom(),
+            ),
+        );
         let id = Id::new("otf-widget-header").with(w.index());
         let resp = ui.interact(drag_rect, id, Sense::CLICK | Sense::DRAG);
         let near = ctx.input(|i| {
@@ -95,9 +127,13 @@ impl App {
             let p = ui.painter().with_clip_rect(header);
             p.rect_filled(header, 0.0, IRON.gamma_multiply(alpha));
             g.text(
-                &p,
+                &p.with_clip_rect(drag_rect),
                 header.min + Vec2::new(g.cw, g.rh * 0.15),
-                w.title(),
+                if w == Widget::Files && self.s.files_anchored {
+                    "Files (anchored)"
+                } else {
+                    w.title()
+                },
                 TEXT,
                 alpha,
             );
@@ -111,6 +147,46 @@ impl App {
                 browserpane::button(ui, g, button_rect, id.with("toggle"), glyph, label, true);
             if toggle.clicked() {
                 self.toggle_widget(w);
+            }
+            if let Some(rect) = anchor_rect {
+                let anchored = self.s.files_anchored;
+                let response = ui.interact(rect, id.with("anchor"), Sense::CLICK);
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Checkbox,
+                        true,
+                        anchored,
+                        "Anchor Files browser",
+                    )
+                });
+                if response.hovered() {
+                    p.rect_filled(rect, 2.0, IRON_HI.gamma_multiply(alpha));
+                    ctx.set_cursor_icon(CursorIcon::PointingHand);
+                }
+                p.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    ph::ANCHOR,
+                    fonts::icon(g.rh * 0.8, anchored),
+                    if anchored {
+                        rgb(octo::paint::STEEL)
+                    } else {
+                        TEXT
+                    }
+                    .gamma_multiply(alpha),
+                );
+                if response.clicked() {
+                    if ctx.input(|i| i.modifiers.shift) {
+                        self.toggle_widget(w);
+                    } else {
+                        self.toggle_files_anchor();
+                    }
+                }
+                response.on_hover_text(if anchored {
+                    "Anchor on: Files keeps its own folder. Click to follow the app's current folder."
+                } else {
+                    "Anchor off: Files follows folders opened in the app. Click to keep this browser independent."
+                });
             }
         }
         if resp.hovered() {
@@ -404,11 +480,15 @@ impl App {
                         Some(f.name.as_str()) == path.file_name().and_then(|n| n.to_str())
                     })
                 {
+                    let changed_folder = lib.active != id;
                     lib.active = id;
                     lib.cursor = cursor;
                     self.crop = None;
                     self.quick = None;
                     self.reset_view();
+                    if changed_folder {
+                        self.sync_files_to_folder();
+                    }
                 } else {
                     self.request_library(parent.to_path_buf(), Some(path), now);
                 }

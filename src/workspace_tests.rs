@@ -19,6 +19,7 @@ fn fixture(tag: &str) -> PathBuf {
 fn app(tag: &str) -> (egui::Context, App, PathBuf) {
     let root: PathBuf = fixture(tag);
     let ctx: egui::Context = egui::Context::default();
+    fonts::install(&ctx, 0);
     let app: App = App::with_settings(ctx.clone(), Settings::default(), Some(root.clone()));
     (ctx, app, root)
 }
@@ -147,14 +148,20 @@ fn changing_library_protects_unsaved_edits_on_cancel_and_save() {
     app.request_library(root.join("nested"), None, 1.0);
     assert!(matches!(app.dialog, Dialog::Unsaved));
     assert_eq!(app.lib.as_ref().unwrap().tree.root, root);
+    assert_eq!(app.files.browser.as_ref().unwrap().tree.root, root);
     app.act(&ctx, Act::Close, 1.1);
     assert!(app.next_library.is_none());
     assert!(app.pending.contains_key(&original));
+    assert_eq!(app.files.browser.as_ref().unwrap().tree.root, root);
     assert_eq!(std::fs::read(&original).unwrap(), bytes);
     app.request_library(root.join("nested"), None, 2.0);
     app.act(&ctx, Act::SaveAllQuit, 2.1);
     assert!(!app.quitting);
     assert_eq!(app.lib.as_ref().unwrap().tree.root, root.join("nested"));
+    assert_eq!(
+        app.files.browser.as_ref().unwrap().tree.root,
+        root.join("nested")
+    );
     assert!(app.pending.is_empty());
     let saved: DynamicImage = image::open(original).unwrap();
     assert_eq!((saved.width(), saved.height()), (24, 32));
@@ -243,6 +250,7 @@ fn settings_load_legacy_and_round_trip_widget_geometry() {
     assert!(!settings.tree);
     assert_eq!(settings.dock.docked_count(), 2);
     assert!(settings.files_root.is_none());
+    assert!(!settings.files_anchored);
     let geometry = crate::dock::Geometry {
         position: [-500.0, 100.0],
         size: [480.0, 620.0],
@@ -250,12 +258,14 @@ fn settings_load_legacy_and_round_trip_widget_geometry() {
     settings.dock.detach(Widget::Files, geometry);
     settings.dock.split = 0.35;
     settings.files_root = Some(PathBuf::from("C:/"));
+    settings.files_anchored = true;
     eframe::set_value(&mut store, "settings", &settings);
     let restored: Settings = eframe::get_value(&store, "settings").unwrap();
     assert!(restored.dock.floating(Widget::Files));
     assert_eq!(restored.dock.widgets[1].geometry, Some(geometry));
     assert_eq!(restored.dock.split, 0.35);
     assert_eq!(restored.files_root, settings.files_root);
+    assert!(restored.files_anchored);
 }
 
 #[test]
@@ -311,5 +321,131 @@ fn folded_files_do_not_consume_image_navigation() {
             1,
             "folded Files must yield image keys; visible focused Files must consume them"
         );
+    }
+}
+
+#[test]
+fn folder_open_follows_only_when_unanchored_in_either_host() {
+    let (_, mut app, root) = app("anchor-open");
+    for floating in [false, true] {
+        if app.s.dock.floating(Widget::Files) != floating {
+            app.toggle_widget(Widget::Files);
+        }
+        for anchored in [false, true] {
+            app.s.files_anchored = false;
+            assert!(app.open_library(&root, 0.0));
+            app.s.files_anchored = anchored;
+            app.request_library(root.join("nested"), None, 1.0);
+            assert_eq!(app.lib.as_ref().unwrap().tree.root, root.join("nested"));
+            assert_eq!(
+                app.files.browser.as_ref().unwrap().tree.root,
+                if anchored {
+                    root.clone()
+                } else {
+                    root.join("nested")
+                }
+            );
+            assert_eq!(app.s.dock.floating(Widget::Files), floating);
+            if anchored {
+                app.toggle_files_anchor();
+                assert_eq!(
+                    app.files.browser.as_ref().unwrap().tree.root,
+                    root.join("nested")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn anchored_launch_keeps_saved_files_path_and_unanchored_launch_follows_library() {
+    let root = fixture("anchor-start");
+    for anchored in [false, true] {
+        let ctx = egui::Context::default();
+        let settings = Settings {
+            files_root: Some(root.join("nested")),
+            files_anchored: anchored,
+            ..Settings::default()
+        };
+        let app = App::with_settings(ctx, settings, Some(root.clone()));
+        assert_eq!(
+            app.files.browser.as_ref().unwrap().tree.root,
+            if anchored {
+                root.join("nested")
+            } else {
+                root.clone()
+            }
+        );
+    }
+}
+
+#[test]
+fn files_follow_favourites_folder_changes_but_failed_opens_leave_location_alone() {
+    let (ctx, mut app, root) = app("anchor-tree");
+    let id = app
+        .lib
+        .as_ref()
+        .unwrap()
+        .tree
+        .nodes
+        .iter()
+        .position(|n| n.name == "nested")
+        .unwrap();
+    app.tree_act(TreeAct::Browse(id), 1.0);
+    assert_eq!(
+        app.files.browser.as_ref().unwrap().tree.root,
+        root.join("nested")
+    );
+    app.toggle_files_anchor();
+    app.tree_act(TreeAct::Browse(0), 2.0);
+    assert_eq!(
+        app.files.browser.as_ref().unwrap().tree.root,
+        root.join("nested")
+    );
+    app.toggle_files_anchor();
+    assert_eq!(app.files.browser.as_ref().unwrap().tree.root, root);
+    // Independent manual Files browsing remains possible until the app
+    // successfully changes folders; a failed open must not disturb it.
+    app.files.start(&ctx, root.join("nested"));
+    app.request_library(root.join("missing"), None, 3.0);
+    assert_eq!(
+        app.files.browser.as_ref().unwrap().tree.root,
+        root.join("nested")
+    );
+    assert_eq!(app.lib.as_ref().unwrap().tree.root, root);
+}
+
+#[test]
+fn anchor_header_click_toggles_sync_without_docking_or_dragging() {
+    let (ctx, mut app, _) = app("anchor-click");
+    app.s.pin_ui = true;
+    let bounds = Rect::from_min_size(Pos2::new(10.0, 80.0), Vec2::new(400.0, 300.0));
+    let mut point = Pos2::ZERO;
+    for floating in [false, true] {
+        if floating {
+            app.toggle_widget(Widget::Files);
+        }
+        let base = if floating { 3.0 } else { 0.0 };
+        let _ = ctx.run_ui(input(base, vec![], Modifiers::NONE), |ui| {
+            let g = Grid::new(&ctx, 20.0);
+            point = Pos2::new(bounds.right() - g.cw * 5.5, bounds.top() + g.rh * 0.675);
+            app.widget_header(ui, Widget::Files, bounds, &g, floating, base);
+        });
+        for (click, expected) in [true, false].into_iter().enumerate() {
+            for down in [true, false] {
+                let now = base + 0.5 + click as f64 + if down { 0.0 } else { 0.03 };
+                let _ = ctx.run_ui(
+                    input(now, pointer(point, down, Modifiers::NONE), Modifiers::NONE),
+                    |ui| {
+                        let g = Grid::new(&ctx, 20.0);
+                        app.widget_header(ui, Widget::Files, bounds, &g, floating, now);
+                    },
+                );
+            }
+            assert_eq!(app.s.files_anchored, expected);
+            assert_eq!(app.s.dock.floating(Widget::Files), floating);
+            assert!(app.dock_drag.is_none());
+            assert!(app.float_drags[Widget::Files.index()].is_none());
+        }
     }
 }

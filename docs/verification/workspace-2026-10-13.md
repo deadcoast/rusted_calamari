@@ -9,7 +9,7 @@ The accepted favourites glyphs/colours remain the rendering authority.
 
 | Check | Result | Evidence boundary |
 | --- | --- | --- |
-| `cargo test --release --locked` | **42 passed**: 4 filesystem, 24 application, 9 OTF, 5 file-operation tests | Real temporary filesystem fixtures and headless egui input/layout |
+| `cargo test --release --locked` | **46 passed**: 4 filesystem, 28 application, 9 OTF, 5 file-operation tests | Real temporary filesystem fixtures and headless egui input/layout |
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed | Compile/static checks, including the smoke runner |
 | `cargo build --release --locked --bin rusted-calamari` | Passed | Normal executable at `target/release/rusted-calamari.exe` |
 | Official `designmd lint DESIGN.md` | 0 errors, 0 warnings | Design token/schema and contrast checks |
@@ -48,9 +48,29 @@ now uses the outer origin and client size, matching the viewport builder.
 Failed runs remain in `target/workspace-smoke-20261013-164518` (unsupported
 child capture) and `target/workspace-smoke-20261013-164802` (geometry drift).
 
-After that native run, a final keyboard-only fix stopped folded Files from
-consuming image navigation; its egui regression test and the full 42-test
-suite pass. The final normal release executable includes that fix.
+After that native run, a keyboard-only fix stopped folded Files from
+consuming image navigation; its egui regression test remains in the full
+suite. The normal release executable includes that fix.
+
+## Anchor follow-up
+
+Files now follows successful app folder changes by default. Its hover
+header's Anchor toggle pauses following, independently of docking. Turning
+it off immediately follows the current app folder. The preference survives
+restart; anchored startup retains the browser's saved independent path.
+
+The additional tests cover header press/release events in both hosts,
+anchored/unanchored folder opens, immediate resume, startup, persistence,
+Favourites navigation, failed opens, and unsaved-edit cancellation/save.
+Strict Clippy, the normal release build, design lint and static audit pass.
+
+Native evidence: [`target/workspace-anchor-20261013/`](../../target/workspace-anchor-20261013/).
+The complete smoke run passes, including three new folder-sync states.
+Screenshots `13-unanchored-follows-open.png`,
+`14-anchored-keeps-folder.png` and `15-anchor-off-resumes-sync.png` capture
+the accepted folder change, anchored retention and immediate resume. The
+on/off screenshots were visually inspected. These use application actions;
+the header click itself is exercised through egui input tests.
 
 ## Remaining native input checks
 

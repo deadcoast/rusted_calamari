@@ -87,9 +87,16 @@ Pin the interface.
 
 **Favourites**, above, keeps the existing library/category tree and sorting
 hotkeys. **Files**, below, browses the full filesystem using the same OTF
-arms, folding and overflow pages. It starts at the library on first use and
-remembers its last location. Category names such as `_fav_` are ordinary
-folders in Files.
+arms, folding and overflow pages. By default it follows the app's current
+image folder, including folders opened from the hover menu and Favourites.
+Category names such as `_fav_` are ordinary folders in Files.
+
+Click the **Anchor** beside the Files header's detach button to keep Files
+at its own location when the app changes folders. A filled anchor and
+`Files (anchored)` show that syncing is paused. Click it again to immediately
+follow the app's current folder. The setting persists across launches and
+works in both docked and detached windows. Anchored Files restores its own
+saved location. Cancelled or failed folder opens never change its location.
 
 Hover either widget's header and drag it out to make a separate native
 window. The remaining widget fills the dock. Drag the detached header back

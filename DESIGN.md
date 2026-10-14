@@ -129,6 +129,12 @@ close returns a widget to the dock, preserving access and its content.
 The fold tab has a gated triple-click recall/restore gesture; ordinary
 folding is unchanged when the pair gesture is unavailable.
 
+Files has an Anchor toggle in the shared hover header, immediately before
+Dock/Detach. The existing Phosphor anchor is outlined with the normal text
+colour when off, filled with steel when on; `Files (anchored)` supplies a
+text state as well. Anchor controls folder-following independently of
+window placement. It never adds a background to a tree root.
+
 Files shows loading, empty, unavailable and populated folders explicitly.
 Unavailable folders can retry. Links are labelled and never traversed
 recursively. Selecting a normal media file previews it; other file types
