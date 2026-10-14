@@ -6,6 +6,7 @@ mod dock;
 mod focus;
 mod fonts;
 mod glyph;
+mod icon;
 mod loader;
 mod saver;
 mod theme;
@@ -59,6 +60,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Calamari workspace QA")
+            .with_icon(icon::data())
             .with_inner_size([1200.0, 850.0])
             .with_position([60.0, 60.0])
             .with_min_inner_size([320.0, 200.0])

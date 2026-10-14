@@ -13,6 +13,7 @@ mod dock;
 mod focus;
 mod fonts;
 mod glyph;
+mod icon;
 mod loader;
 mod saver;
 mod theme;
@@ -28,6 +29,7 @@ fn main() -> eframe::Result {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Rusted Calamari")
+            .with_icon(icon::data())
             .with_inner_size([1440.0, 900.0])
             // Small enough for image focus to wrap a portrait picture.
             .with_min_inner_size([320.0, 200.0])

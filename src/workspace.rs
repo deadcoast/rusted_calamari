@@ -352,6 +352,7 @@ impl App {
             let id = egui::ViewportId::from_hash_of(("otf-native", w.index()));
             let builder = egui::ViewportBuilder::default()
                 .with_title(format!("{} — Rusted Calamari", w.title()))
+                .with_icon(crate::icon::data())
                 .with_position(Pos2::from(geometry.position))
                 .with_inner_size(Vec2::from(geometry.size))
                 .with_min_inner_size([320.0, 240.0])
